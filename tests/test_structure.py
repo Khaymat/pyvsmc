@@ -1,11 +1,11 @@
-"""Tests for pysmc.structure — BOS & CHOCH engine."""
+"""Tests for pyvsmc.structure — BOS & CHOCH engine."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from pysmc.structure import detect_structure
+from pyvsmc.structure import detect_structure
 
 
 class TestStructureBasic:
@@ -205,7 +205,7 @@ class TestStructurePolars:
         pytest.importorskip("polars")
         import polars as pl
 
-        from pysmc.structure import structure_polars
+        from pyvsmc.structure import structure_polars
 
         df = pl.DataFrame(
             {

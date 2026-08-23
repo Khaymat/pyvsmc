@@ -1,19 +1,19 @@
-"""pysmc — ultra-fast vectorized Smart Money Concepts.
+"""pyvsmc — ultra-fast vectorized Smart Money Concepts.
 
 Public API
 ----------
-* :mod:`pysmc.fvg` — Fair Value Gap detection
-* :mod:`pysmc.swings` — Fractal swing highs/lows
-* :mod:`pysmc.structure` — BOS & CHOCH engine
-* :mod:`pysmc.order_blocks` — Order block identification
-* :mod:`pysmc.polars_ext` — Polars ``.smc`` namespace
+* :mod:`pyvsmc.fvg` — Fair Value Gap detection
+* :mod:`pyvsmc.swings` — Fractal swing highs/lows
+* :mod:`pyvsmc.structure` — BOS & CHOCH engine
+* :mod:`pyvsmc.order_blocks` — Order block identification
+* :mod:`pyvsmc.polars_ext` — Polars ``.smc`` namespace
 
 Quickstart
 ----------
 .. code-block:: python
 
     import numpy as np
-    import pysmc as smc
+    import pyvsmc as smc
 
     high  = np.array([...], dtype=float)
     low   = np.array([...], dtype=float)
@@ -40,7 +40,7 @@ from .structure import StructureResult, detect_structure, structure_polars
 from .swings import SwingResult, detect_swings, swings_polars
 
 # Polars helpers — imported lazily to keep polars optional, but re-exported
-# here for convenience.  Importing pysmc should not fail if polars is
+# here for convenience.  Importing pyvsmc should not fail if polars is
 # absent; polars_ext handles that gracefully.
 try:
     from .polars_ext import add_smc_columns  # noqa: F401

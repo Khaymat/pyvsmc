@@ -1,11 +1,11 @@
-"""Tests for pysmc.fvg — Fair Value Gap detection."""
+"""Tests for pyvsmc.fvg — Fair Value Gap detection."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from pysmc.fvg import detect_fvg
+from pyvsmc.fvg import detect_fvg
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -238,7 +238,7 @@ class TestFVGPolars:
         pytest.importorskip("polars")
         import polars as pl
 
-        from pysmc.fvg import fvg_polars
+        from pyvsmc.fvg import fvg_polars
 
         df = pl.DataFrame(
             {
@@ -255,7 +255,7 @@ class TestFVGPolars:
         pytest.importorskip("polars")
         import polars as pl
 
-        from pysmc.fvg import fvg_polars
+        from pyvsmc.fvg import fvg_polars
 
         df = pl.DataFrame({"high": [10.0, 10.2, 10.8, 11.0, 11.2], "low": [9.0, 9.2, 11.0, 10.8, 10.5]})
         out = fvg_polars(df, compute_mitigation=True)

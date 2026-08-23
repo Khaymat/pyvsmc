@@ -3,17 +3,17 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pysmc"
+name = "pyvsmc"
 version = "0.1.0"
 description = "Ultra-fast, fully vectorized market structure and Smart Money Concepts (SMC) technical analysis using NumPy and Polars"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [
-    { name = "pysmc contributors", email = "hello@pysmc.dev" },
+    { name = "pyvsmc contributors", email = "hello@pyvsmc.dev" },
 ]
 maintainers = [
-    { name = "pysmc maintainers", email = "hello@pysmc.dev" },
+    { name = "pyvsmc maintainers", email = "hello@pyvsmc.dev" },
 ]
 keywords = ["trading", "technical-analysis", "smart-money-concepts", "smc", "market-structure", "numpy", "polars", "quant"]
 classifiers = [
@@ -54,17 +54,17 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/pysmc/pysmc"
-Repository = "https://github.com/pysmc/pysmc"
-Documentation = "https://github.com/pysmc/pysmc#readme"
-Issues = "https://github.com/pysmc/pysmc/issues"
-Changelog = "https://github.com/pysmc/pysmc/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Khaymat/pyvsmc"
+Repository = "https://github.com/Khaymat/pyvsmc"
+Documentation = "https://github.com/Khaymat/pyvsmc#readme"
+Issues = "https://github.com/Khaymat/pyvsmc/issues"
+Changelog = "https://github.com/Khaymat/pyvsmc/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-pysmc = ["py.typed"]
+pyvsmc = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -107,7 +107,7 @@ module = "polars.*"
 ignore_missing_imports = true
 
 [tool.coverage.run]
-source = ["pysmc"]
+source = ["pyvsmc"]
 branch = true
 
 [tool.coverage.report]

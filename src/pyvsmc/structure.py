@@ -3,7 +3,7 @@
 Definitions
 -----------
 * **Swing-based structure levels** are produced by fractal swing detection
-  (see :mod:`pysmc.swings`).
+  (see :mod:`pyvsmc.swings`).
 * **BOS (Break of Structure)**: price ``close`` breaks the most recent
   active swing high (in an uptrend) or swing low (in a downtrend) — i.e.
   continuation of the current trend.

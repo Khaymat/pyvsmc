@@ -1,4 +1,4 @@
-"""Tests for pysmc.polars_ext namespace."""
+"""Tests for pyvsmc.polars_ext namespace."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ class TestPolarsExt:
         pytest.importorskip("polars")
         import polars as pl
 
-        from pysmc.polars_ext import add_smc_columns
+        from pyvsmc.polars_ext import add_smc_columns
 
         df = pl.DataFrame(
             {
@@ -33,7 +33,7 @@ class TestPolarsExt:
     def test_namespace_smc(self) -> None:
         pytest.importorskip("polars")
         import polars as pl
-        import pysmc  # noqa: F401  triggers namespace registration
+        import pyvsmc  # noqa: F401  triggers namespace registration
 
         df = pl.DataFrame(
             {
@@ -59,7 +59,7 @@ class TestPolarsExt:
         pytest.importorskip("polars")
         import polars as pl
 
-        from pysmc.polars_ext import add_smc_columns
+        from pyvsmc.polars_ext import add_smc_columns
 
         df = pl.DataFrame(
             {
@@ -78,7 +78,7 @@ class TestPolarsExt:
         pytest.importorskip("polars")
         import polars as pl
 
-        from pysmc.polars_ext import add_smc_columns
+        from pyvsmc.polars_ext import add_smc_columns
 
         df = pl.DataFrame(
             {
@@ -93,7 +93,7 @@ class TestPolarsExt:
 
     def test_not_dataframe_raises(self) -> None:
         pytest.importorskip("polars")
-        from pysmc.polars_ext import add_smc_columns
+        from pyvsmc.polars_ext import add_smc_columns
 
         with pytest.raises(TypeError, match="polars.DataFrame"):
             add_smc_columns([1, 2, 3])  # type: ignore[arg-type]

@@ -1,15 +1,15 @@
-# pysmc
+# pyvsmc
 
 [![Python Version](https://img.shields.io/badge/python-%3E%3D3.10-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-orange.svg)](https://pypi.org/project/pysmc/)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-orange.svg)](https://pypi.org/project/pyvsmc/)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#testing)
 [![Type Checked](https://img.shields.io/badge/mypy-strict-blue.svg)](#type-safety)
 [![Ruff](https://img.shields.io/badge/lint-ruff-red.svg)](https://github.com/astral-sh/ruff)
 
 **Ultra-fast, fully vectorized market structure & Smart Money Concepts (SMC) for Python.**
 
-`pysmc` provides pure NumPy + Polars implementations of the most widely used SMC / ICT concepts — Fair Value Gaps, fractal swings, Break of Structure (BOS), Change of Character (CHOCH), and Order Blocks — with **zero Python for-loops over time-series**, strict typing, and a clean Polars plugin.
+`pyvsmc` provides pure NumPy + Polars implementations of the most widely used SMC / ICT concepts — Fair Value Gaps, fractal swings, Break of Structure (BOS), Change of Character (CHOCH), and Order Blocks — with **zero Python for-loops over time-series**, strict typing, and a clean Polars plugin.
 
 ---
 
@@ -33,22 +33,22 @@
 ## Installation
 
 ```bash
-pip install pysmc
+pip install pyvsmc
 ```
 
 With Polars (recommended):
 
 ```bash
-pip install "pysmc[dev]"   # includes polars, pytest, ruff, mypy
+pip install "pyvsmc[dev]"   # includes polars, pytest, ruff, mypy
 # or
-pip install pysmc polars
+pip install pyvsmc polars
 ```
 
 From source:
 
 ```bash
-git clone https://github.com/pysmc/pysmc
-cd pysmc
+git clone https://github.com/Khaymat/pyvsmc
+cd pyvsmc
 pip install -e ".[dev]"
 ```
 
@@ -62,7 +62,7 @@ pip install -e ".[dev]"
 
 ```python
 import numpy as np
-import pysmc as smc
+import pyvsmc as smc
 
 # OHLC arrays (float)
 high  = np.array([10.0, 11.2, 10.8, 12.5, 11.0, 13.0])
@@ -97,7 +97,7 @@ print(obs.ob_high, obs.ob_low)
 
 ```python
 import polars as pl
-import pysmc  # registers .smc namespace
+import pyvsmc  # registers .smc namespace
 
 df = pl.DataFrame({
     "open":  open_,
@@ -108,7 +108,7 @@ df = pl.DataFrame({
 })
 
 # Functional helper — adds all SMC columns at once
-from pysmc.polars_ext import add_smc_columns
+from pyvsmc.polars_ext import add_smc_columns
 df = add_smc_columns(df, window_size=2, fvg_mitigation=True)
 
 # Or via the .smc namespace (more granular)
@@ -125,8 +125,8 @@ print(df)
 ### Re-using Swings in Structure
 
 ```python
-from pysmc.swings import detect_swings
-from pysmc.structure import detect_structure
+from pyvsmc.swings import detect_swings
+from pyvsmc.structure import detect_structure
 
 swings = detect_swings(high, low, window_size=3)
 structure = detect_structure(
@@ -170,14 +170,14 @@ All functions also have `*_polars(df, ...)` variants and are available via `df.s
 ```bash
 pip install -e ".[dev]"
 pytest -v
-pytest --cov=pysmc --cov-report=term-missing
+pytest --cov=pyvsmc --cov-report=term-missing
 ```
 
 Run type checks and lint:
 
 ```bash
-mypy src/pysmc
-ruff check src/pysmc tests
+mypy src/pyvsmc
+ruff check src/pyvsmc tests
 ```
 
 ---
@@ -185,10 +185,10 @@ ruff check src/pysmc tests
 ## Project Structure
 
 ```
-pysmc/
+pyvsmc/
 ├── pyproject.toml
 ├── README.md
-├── src/pysmc/
+├── src/pyvsmc/
 │   ├── __init__.py
 │   ├── py.typed
 │   ├── fvg.py
@@ -218,12 +218,12 @@ pysmc/
 
 **IMPORTANT — PLEASE READ CAREFULLY**
 
-`pysmc` is an **open-source analytics and research library**. It is provided solely for **educational, informational, and research purposes**.
+`pyvsmc` is an **open-source analytics and research library**. It is provided solely for **educational, informational, and research purposes**.
 
 - **Not Financial Advice.** Nothing in this library, its documentation, examples, or outputs constitutes financial, investment, trading, or other professional advice. No recommendation to buy, sell, or hold any financial instrument is made or implied.
 - **No Warranty of Accuracy or Fitness.** Market structure and Smart Money Concepts are *interpretive frameworks*; their definitions vary across practitioners. The library implements one set of rules that may not match your trading methodology. Outputs may be incorrect, incomplete, or inappropriate for your use case.
 - **Use at Your Own Risk.** Trading and investing involve substantial risk of loss, including loss of principal. Past simulated or historical performance is not indicative of future results. You are solely responsible for your own trading decisions, risk management, and compliance with applicable laws and regulations.
-- **No Liability.** To the fullest extent permitted by law, the authors, contributors, and distributors of `pysmc` disclaim all liability for any loss, damage, cost, or expense arising directly or indirectly from use of this software.
+- **No Liability.** To the fullest extent permitted by law, the authors, contributors, and distributors of `pyvsmc` disclaim all liability for any loss, damage, cost, or expense arising directly or indirectly from use of this software.
 - **Do Your Own Research (DYOR).** Always validate any signal or analysis with independent research, additional data sources, and, where appropriate, advice from a qualified professional.
 
 By using this software you acknowledge that you have read, understood, and agree to this disclaimer.
@@ -234,7 +234,7 @@ By using this software you acknowledge that you have read, understood, and agree
 
 MIT License — see [LICENSE](LICENSE) for details.
 
-Copyright (c) 2026 pysmc contributors.
+Copyright (c) 2026 pyvsmc contributors.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 

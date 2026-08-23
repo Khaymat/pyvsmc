@@ -1,4 +1,4 @@
-"""Polars extension / helper for pysmc — ``.smc`` namespace.
+"""Polars extension / helper for pyvsmc — ``.smc`` namespace.
 
 Provides a clean DataFrame helper that attaches all SMC indicator columns
 via a single call, as well as individual method access through a
@@ -9,7 +9,7 @@ Usage
 .. code-block:: python
 
     import polars as pl
-    import pysmc  # registers the extension
+    import pyvsmc  # registers the extension
 
     df = pl.DataFrame({
         "open":  [...],
@@ -20,7 +20,7 @@ Usage
     })
 
     # Option A: functional helper
-    from pysmc.polars_ext import add_smc_columns
+    from pyvsmc.polars_ext import add_smc_columns
     df2 = add_smc_columns(df)
 
     # Option B: namespace (if you prefer OO style)
@@ -30,7 +30,7 @@ Usage
     df2 = df.smc.structure(window_size=2)
     df2 = df.smc.order_blocks(lookback=5)
 
-The extension is *optional* — importing ``pysmc`` does not require
+The extension is *optional* — importing ``pyvsmc`` does not require
 ``polars`` to be installed.  The namespace is only registered when
 ``polars`` is available; otherwise helper functions raise ``ImportError``
 with an actionable message.
@@ -56,8 +56,8 @@ except ImportError:
 def _require_polars() -> None:
     if not _POLARS_AVAILABLE:
         raise ImportError(
-            "polars is required for the pysmc polars extension. "
-            "Install it with `pip install polars` or `pip install pysmc[dev]`."
+            "polars is required for the pyvsmc polars extension. "
+            "Install it with `pip install polars` or `pip install pyvsmc[dev]`."
         )
 
 

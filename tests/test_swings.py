@@ -1,11 +1,11 @@
-"""Tests for pysmc.swings — fractal swing highs/lows."""
+"""Tests for pyvsmc.swings — fractal swing highs/lows."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from pysmc.swings import detect_swings
+from pyvsmc.swings import detect_swings
 
 
 class TestSwingsBasic:
@@ -144,7 +144,7 @@ class TestSwingsPolars:
         pytest.importorskip("polars")
         import polars as pl
 
-        from pysmc.swings import swings_polars
+        from pyvsmc.swings import swings_polars
 
         df = pl.DataFrame({"high": [1.0, 5.0, 1.0, 5.0, 1.0], "low": [0.0, 0.2, 0.0, 0.2, 0.0]})
         out = swings_polars(df, window_size=1)

@@ -1,11 +1,11 @@
-"""Tests for pysmc.order_blocks."""
+"""Tests for pyvsmc.order_blocks."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from pysmc.order_blocks import detect_order_blocks
+from pyvsmc.order_blocks import detect_order_blocks
 
 
 class TestOrderBlocksBasic:
@@ -90,7 +90,7 @@ class TestOrderBlocksEdge:
         pytest.importorskip("polars")
         import polars as pl
 
-        from pysmc.order_blocks import order_blocks_polars
+        from pyvsmc.order_blocks import order_blocks_polars
 
         df = pl.DataFrame(
             {
