@@ -116,45 +116,27 @@ def _find_last_opposing_candle_vectorized(
         nan_candle |= np.isnan(low)
     opposing = opposing & ~nan_candle
 
-    # Vectorized backward search: for each impulse i, search indices [i-lookback, i-1]
-    # Use broadcasting.  To keep memory bounded, chunk by impulse.
+    # Per-impulse backward search (O(m*lookback), low memory)
     ob_indices = np.full(m, -1, dtype=np.int64)
     valid = np.zeros(m, dtype=bool)
-
-    chunk_size = 2048
-    arange_n = np.arange(n)
-
-    for start in range(0, m, chunk_size):
-        chunk = impulse_indices[start : start + chunk_size]  # shape (c,)
-        c = chunk.shape[0]
-
-        # Build start and end bounds
-        start_idx = np.maximum(0, chunk - lookback)  # (c,)
-        end_idx = chunk - 1  # inclusive, but we treat exclusive of impulse
-
-        # Create (c, n) mask: j in [start_idx[k], end_idx[k]] and opposing[j]
-        # Instead of full (c,n) we can create via broadcasting with arange
-        # j_indices shape (1, n), start_idx shape (c,1), etc.
-        j = arange_n[None, :]  # (1, n)
-        s = start_idx[:, None]  # (c, 1)
-        e = end_idx[:, None]  # (c, 1)
-
-        in_window = (j >= s) & (j <= e)  # (c, n)
-        # opposing row
-        opp_row = opposing[None, :]  # (1, n)
-        candidate = in_window & opp_row  # (c, n)
-
-        # Need last (max j) where candidate True.
-        # We can reverse argmax: find last True via argmax on reversed.
-        # Use trick: multiply candidate by j, then max.  If no True, max ==0 but we need to detect.
-        # Approach: use where with -1 sentinel, then max.
-        # Create array of j indices where candidate else -1, then max per row.
-        j_broadcast = np.broadcast_to(arange_n, (c, n))
-        masked_j = np.where(candidate, j_broadcast, -1)
-        last_j = np.max(masked_j, axis=1)  # (c,)
-        has = last_j >= 0
-        ob_indices[start : start + c][has] = last_j[has]
-        valid[start : start + c] = has
+    # Precompute opposing indices where true
+    # For each impulse, scan backwards up to lookback
+    for k in range(m):
+        imp = int(impulse_indices[k])
+        start_idx = max(0, imp - lookback)
+        end_idx = imp - 1
+        if end_idx < start_idx:
+            continue
+        # Search backwards for last opposing
+        # Slice window and find last True via where
+        window_opposing = opposing[start_idx : end_idx + 1]
+        # Find last True index in window
+        # Use np.where on reversed
+        pos = np.where(window_opposing)[0]
+        if pos.size > 0:
+            last_pos = pos[-1]
+            ob_indices[k] = start_idx + last_pos
+            valid[k] = True
 
     return ob_indices, valid
 

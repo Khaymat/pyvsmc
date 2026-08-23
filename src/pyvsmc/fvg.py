@@ -151,45 +151,26 @@ def _compute_mitigation_vectorized(
         flag = future_max >= bearish_lower[bearish_indices]
         mitigated[bearish_indices[flag]] = True
 
-    # Now find first mitigation index for flagged gaps using vectorized search.
-    # To avoid O(n^2) memory we chunk.  For each gap index i, first j>i where
-    # low[j] <= bullish_upper[i] (or high[j] >= bearish_lower[i]).
-    # We use broadcasting per chunk: (chunk_gaps, n) boolean matrix then argmax.
-
-    chunk_size = 1024  # keeps (chunk x n) matrix manageable
-
+    # Find first mitigation index per gap via 1-D scan (low memory, O(m*n) but m small)
     if bullish_indices.size > 0:
-        # Only process mitigated bull gaps
         bull_mitigated_idx = bullish_indices[mitigated[bullish_indices]]
-        for start in range(0, bull_mitigated_idx.size, chunk_size):
-            chunk = bull_mitigated_idx[start : start + chunk_size]
-            # Build (chunk_size, n) boolean: low[j] <= upper[i] and j > i
-            # low shape (n,), chunk shape (c,)
-            # comparison: low[None, :] <= upper[:, None]
-            upper_col = bullish_upper[chunk][:, None]  # (c, 1)
-            low_row = low[None, :]  # (1, n)
-            pierce = low_row <= upper_col  # (c, n)
-            # mask out j <= i
-            idx_col = chunk[:, None]
-            j_indices = np.arange(n)[None, :]
-            pierce &= j_indices > idx_col
-            # argmax over axis=1 gives first True (since we want first j)
-            # but argmax returns 0 if no True; we already know at least one True exists
-            first_j = np.argmax(pierce, axis=1)
-            mitigated_idx[chunk] = first_j.astype(np.int64)
+        for idx in bull_mitigated_idx:
+            thresh = bullish_upper[idx]
+            # search future low <= thresh
+            future = low[idx + 1 :]
+            # use where to find first
+            pos = np.where(future <= thresh)[0]
+            if pos.size > 0:
+                mitigated_idx[idx] = int(idx + 1 + pos[0])
 
     if bearish_indices.size > 0:
         bear_mitigated_idx = bearish_indices[mitigated[bearish_indices]]
-        for start in range(0, bear_mitigated_idx.size, chunk_size):
-            chunk = bear_mitigated_idx[start : start + chunk_size]
-            lower_col = bearish_lower[chunk][:, None]
-            high_row = high[None, :]
-            pierce = high_row >= lower_col
-            idx_col = chunk[:, None]
-            j_indices = np.arange(n)[None, :]
-            pierce &= j_indices > idx_col
-            first_j = np.argmax(pierce, axis=1)
-            mitigated_idx[chunk] = first_j.astype(np.int64)
+        for idx in bear_mitigated_idx:
+            thresh = bearish_lower[idx]
+            future = high[idx + 1 :]
+            pos = np.where(future >= thresh)[0]
+            if pos.size > 0:
+                mitigated_idx[idx] = int(idx + 1 + pos[0])
 
     return mitigated, mitigated_idx
 
@@ -252,40 +233,31 @@ def _compute_threshold_mitigation(
         else:
             flag = np.zeros_like(bear_idx, dtype=bool)
         mitigated[bear_idx[flag]] = True
-    # chunked search for index
-    chunk_size = 1024
+    # per-gap 1-D search (low memory)
     if bull_idx.size > 0:
         b_m = bull_idx[mitigated[bull_idx]]
-        for start in range(0, b_m.size, chunk_size):
-            chunk = b_m[start : start + chunk_size]
-            thresh_col = bull_thresh[chunk][:, None]
+        for idx in b_m:
+            thresh = bull_thresh[idx]
             if bull_cond == "low_le":
-                row = low[None, :]
-                pierce = row <= thresh_col
+                future = low[idx + 1 :]
+                pos = np.where(future <= thresh)[0]
             else:
-                row = close[None, :]
-                pierce = row < thresh_col
-            idx_col = chunk[:, None]
-            j = np.arange(n)[None, :]
-            pierce &= j > idx_col
-            first = np.argmax(pierce, axis=1)
-            mitigated_idx[chunk] = first.astype(np.int64)
+                future = close[idx + 1 :]
+                pos = np.where(future < thresh)[0]
+            if pos.size > 0:
+                mitigated_idx[idx] = int(idx + 1 + pos[0])
     if bear_idx.size > 0:
         b_m = bear_idx[mitigated[bear_idx]]
-        for start in range(0, b_m.size, chunk_size):
-            chunk = b_m[start : start + chunk_size]
-            thresh_col = bear_thresh[chunk][:, None]
+        for idx in b_m:
+            thresh = bear_thresh[idx]
             if bear_cond == "high_ge":
-                row = high[None, :]
-                pierce = row >= thresh_col
+                future = high[idx + 1 :]
+                pos = np.where(future >= thresh)[0]
             else:
-                row = close[None, :]
-                pierce = row > thresh_col
-            idx_col = chunk[:, None]
-            j = np.arange(n)[None, :]
-            pierce &= j > idx_col
-            first = np.argmax(pierce, axis=1)
-            mitigated_idx[chunk] = first.astype(np.int64)
+                future = close[idx + 1 :]
+                pos = np.where(future > thresh)[0]
+            if pos.size > 0:
+                mitigated_idx[idx] = int(idx + 1 + pos[0])
     return mitigated, mitigated_idx
 
 

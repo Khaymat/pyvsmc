@@ -307,7 +307,7 @@ def detect_structure(
     if use_numba:
         import numba as nb  # type: ignore[import-untyped]
 
-        @nb.njit  # type: ignore[misc]
+        @nb.njit(cache=True)  # type: ignore[misc]
         def _scan(
             break_above: np.ndarray,
             break_below: np.ndarray,

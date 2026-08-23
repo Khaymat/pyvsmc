@@ -18,5 +18,7 @@ warnings.warn(
 )
 
 from pyvsmc import *  # noqa: F401,F403
-from pyvsmc import __version__  # noqa: F401
-from pyvsmc import add_smc_columns  # noqa: F401
+from pyvsmc import (
+    __version__,  # noqa: F401
+    add_smc_columns,  # noqa: F401
+)
