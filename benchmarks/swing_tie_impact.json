@@ -1,0 +1,6 @@
+{
+  "flat_10": {"all": {"swing_high": 8, "swing_low": 8, "both": 8}, "first": {"swing_high": 0, "swing_low": 0, "both": 0}, "strict": {"swing_high": 0, "swing_low": 0}},
+  "plateau_7": {"all": 3, "first": 1, "strict": 0},
+  "random_1000": {"all": 211, "first": 211, "strict": 211},
+  "note": "random no plateau -> same; plateau reduces BOS/EQH spam"
+}
