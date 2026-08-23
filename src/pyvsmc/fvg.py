@@ -212,9 +212,14 @@ def _compute_mitigation_vectorized(
 
     A **bearish** FVG [lower, upper] is mitigated when ``high[j] >= bearish_lower[i]``.
 
-    This implementation is O(n^2) in worst case but fully vectorized via
-    broadcasting / cumulative operations where possible.  For large n
-    (e.g. 100k) we use a reverse-cumulative-min/max trick to achieve O(n).
+    Complexity:
+    - Mitigation existence flags via reverse-cumulative min/max are O(n)
+      (NaN-aware, `n+1` aux).
+    - First-occurrence indices are O(n + g·d) average/practical where
+      `g` = number of gaps and `d` = average mitigation distance (early-break
+      Numba scan, single pass for mit/CE50/full). Worst case O(g·n),
+      Θ(n²) when g=Θ(n) and d=Θ(n) (e.g. all gaps mitigate only at final bar).
+    - Do not confuse the O(n) flag pass with the first-index pass.
 
     Returns:
         mitigated: bool array shape (n,)

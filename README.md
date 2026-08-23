@@ -2,7 +2,7 @@
 
 [![Python Version](https://img.shields.io/badge/python-%3E%3D3.10-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![PyPI version](https://img.shields.io/badge/pypi-v0.3.1-orange.svg)](https://pypi.org/project/pyvsmc/)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.3.2-orange.svg)](https://pypi.org/project/pyvsmc/)
 [![Tests](https://img.shields.io/badge/tests-92%20passed-brightgreen.svg)](#testing)
 [![Type Checked](https://img.shields.io/badge/mypy-strict-blue.svg)](#testing)
 [![Ruff](https://img.shields.io/badge/lint-ruff-red.svg)](https://github.com/astral-sh/ruff)
@@ -108,13 +108,13 @@ df = add_smc_columns(df, window_size=2, fvg_mitigation=True)
 ldf = df.lazy()
 ldf = ldf.pipe(lambda d: pyvsmc.fvg_polars(d))  # native expr
 
-# Namespace
+# Namespace — fvg/swings have native LazyFrame support; other modules use eager fallback
 df = pl.DataFrame({"open": open_, "high": high, "low": low, "close": close})
 df = df.smc.add_all(window_size=2, include_liquidity=True)
 df = df.smc.fvg(min_gap_size=0.5)
 df = df.smc.swings(window_size=2)
-df = df.smc.structure(window_size=2, break_mode="wick")
-df = df.smc.order_blocks(lookback=5, zone_mode="body")
+df = df.smc.structure(window_size=2)
+df = df.smc.order_blocks(lookback=5)
 df = df.smc.liquidity(equal_threshold=0.001)
 df = df.smc.zones(eq_threshold=0.02)
 ```
@@ -142,7 +142,7 @@ Returns `equal_high/low` (adjacent) + `equal_swing_high/low` (EQH/EQL), `sweep_h
 ### `detect_zones(high, low, close, window_size=2, eq_threshold=0.02)`
 Returns `premium/discount/equilibrium`, `range_high/low`, `ote_high/low/705`, `in_ote`.
 
-All have `*_polars` variants. Polars `add_smc_columns` params: `include_*`, `fvg_mitigation`, `break_mode`, `zone_mode` (see `polars_ext.py`).
+All have `*_polars` variants. Polars `add_smc_columns` params: `include_*`, `fvg_mitigation` (see `polars_ext.py`). NumPy `break_mode`/`zone_mode` are not yet exposed via Polars.
 
 ---
 
@@ -197,20 +197,23 @@ pyvsmc/
 
 ## Performance & Complexity
 
-**Benchmark 0.3.1** (synthetic OHLC, `window_size=2`, 3 runs median, `tracemalloc` peak):
+**Benchmark 0.3.2** (synthetic OHLC random, `window_size=2`, 3 runs median, `tracemalloc` peak):
 
 | n | swings | fvg | fvg+mit | struct | OB | liquidity | zones | polars eager |
 |---|---|---|---|---|---|---|---|---|
 | 1k | 0.79ms | 1.16ms | 1.96ms | 17.5ms* | 19.6ms | 11ms | 1.79ms | 58ms |
 | 10k | 2.57ms | 1.90ms | 2.40ms | 19.7ms* | 28.8ms | 154ms | 4.5ms | 206ms |
-| 100k | 23ms | 8.4ms | 19ms** | 47ms | 74ms | 1306ms | 39ms | 1452ms |
+| 100k | 23ms | 8.4ms | 19ms | 47ms | 74ms | 1306ms | 39ms | 1452ms |
 
-`* struct cold JIT ~15ms, warm 47ms/100k`, `** fvg_mit 0.3.1 Numba single-scan, 0.3.0 SKIP`
+`* struct cold JIT ~15ms, warm 47ms/100k`
 
-**Complexity:**
-- `swings` `O(n)`, `fvg` w/o mit `O(n)`, `fvg+mit` `O(n + g·d)` (`g` gaps, `d` avg distance, Numba early-break, worst `O(g·n)` documented), `structure` `O(n)` Numba `cache=True`, `OB` `O(m·L)` bounded `L=lookback`, `liquidity EQH` `O(s)` vectorized diff.
+**Typical random-data speedup (preserved):** `0.3.1 fvg_mit 963ms → 0.3.2 16ms` at `100k` ≈ **57× faster** for `d` small. Pathological `g=Θ(n), d=Θ(n)` (all gaps mitigate at last bar, see `benchmarks/bench_adversarial.py`) remains worst `O(g·n)=Θ(n²)` — `10k 0.41s → 40k 6.5s → 80k 31s`, same as `0.3.1` family.
 
-**Limitations:** `fvg mit` with `g=Θ(n)` still worst `O(n²)` — avoid `compute_mitigation=True` on 500k+ dense gaps; `polars Lazy` for `fvg/swings` native, others fallback `collect()`; `order_blocks` many impulses → `lookback` bound.
+**Complexity (corrected):**
+- `swings` `O(n)`, `fvg` w/o mit `O(n)` (bulk), `fvg existence flags` `O(n)` via NaN-safe reverse-cum, `fvg first-index` `O(n + g·d)` avg/practical, worst `O(g·n)` `Θ(n²)` when `g=Θ(n)` and `d=Θ(n)`.
+- `structure` `O(n)` Numba `cache=True` (top-level), `OB` `O(m·L)` bounded `L=lookback`, `liquidity EQH` `O(s)` diff.
+
+**Limitations:** `fvg mit` worst `Θ(n²)` — avoid `compute_mitigation=True` on 500k+ dense adversarial gaps; for typical random gaps it's `~16ms/100k`. `polars Lazy` for `fvg/swings` native (`shift`/`rolling_max`), others fallback honest `collect()->eager->lazy`; `order_blocks` many impulses → `lookback` bound.
 
 ---
 
