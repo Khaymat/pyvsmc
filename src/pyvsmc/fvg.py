@@ -17,9 +17,123 @@ sizes, and an optional vectorized mitigation tracker.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib.util
 
 import numpy as np
 import numpy.typing as npt
+
+_HAS_NUMBA = importlib.util.find_spec("numba") is not None
+if _HAS_NUMBA:
+    import numba as nb  # type: ignore[import-untyped]
+
+    @nb.njit(cache=True)
+    def _fvg_first_idx_numba(
+        n: int,
+        gap_idx: np.ndarray,
+        thresh: np.ndarray,
+        target: np.ndarray,
+        is_low: bool,
+        out_idx: np.ndarray,
+    ) -> None:
+        # target is low if is_low else high; thresh per gap
+        for k in range(gap_idx.shape[0]):
+            idx = gap_idx[k]
+            th = thresh[idx]
+            if np.isnan(th):
+                continue
+            # need mitigated flag already true, but search anyway
+            for j in range(idx + 1, n):
+                v = target[j]
+                if np.isnan(v):
+                    continue
+                if is_low:
+                    if v <= th:
+                        out_idx[idx] = j
+                        break
+                else:
+                    if v >= th:
+                        out_idx[idx] = j
+                        break
+
+    @nb.njit(cache=True)
+    def _fvg_first_idx_three_numba(
+        n: int,
+        gap_idx: np.ndarray,
+        mit_thresh: np.ndarray,
+        ce_thresh: np.ndarray,
+        full_thresh: np.ndarray,
+        low: np.ndarray,
+        high: np.ndarray,
+        close: np.ndarray,
+        out_mit: np.ndarray,
+        out_mit_idx: np.ndarray,
+        out_50: np.ndarray,
+        out_50_idx: np.ndarray,
+        out_full: np.ndarray,
+        out_full_idx: np.ndarray,
+        out_inv: np.ndarray,
+        is_bull: bool,
+    ) -> None:
+        for k in range(gap_idx.shape[0]):
+            idx = gap_idx[k]
+            th_mit = mit_thresh[idx]
+            th_50 = ce_thresh[idx]
+            th_full = full_thresh[idx]
+            found_mit = False
+            found_50 = False
+            found_full = False
+            for j in range(idx + 1, n):
+                if not found_mit and not np.isnan(th_mit):
+                    v = low[j] if is_bull else high[j]
+                    if not np.isnan(v):
+                        if is_bull:
+                            if v <= th_mit:
+                                out_mit[idx] = True
+                                out_mit_idx[idx] = j
+                                found_mit = True
+                        else:
+                            if v >= th_mit:
+                                out_mit[idx] = True
+                                out_mit_idx[idx] = j
+                                found_mit = True
+                if not found_50 and not np.isnan(th_50):
+                    v = low[j] if is_bull else high[j]
+                    if not np.isnan(v):
+                        if is_bull:
+                            if v <= th_50:
+                                out_50[idx] = True
+                                out_50_idx[idx] = j
+                                found_50 = True
+                        else:
+                            if v >= th_50:
+                                out_50[idx] = True
+                                out_50_idx[idx] = j
+                                found_50 = True
+                if not found_full and not np.isnan(th_full):
+                    v = low[j] if is_bull else high[j]
+                    if not np.isnan(v):
+                        if is_bull:
+                            if v <= th_full:
+                                out_full[idx] = True
+                                out_full_idx[idx] = j
+                                found_full = True
+                        else:
+                            if v >= th_full:
+                                out_full[idx] = True
+                                out_full_idx[idx] = j
+                                found_full = True
+                if found_mit and found_50 and found_full:
+                    break
+            if found_full:
+                fj = out_full_idx[idx]
+                if fj != -1 and fj < n and not np.isnan(close[fj]):
+                    if is_bull:
+                        if close[fj] < full_thresh[idx]:
+                            out_inv[idx] = True
+                    else:
+                        if close[fj] > full_thresh[idx]:
+                            out_inv[idx] = True
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,42 +557,55 @@ def detect_fvg(
     ce_level[idx_bull_final] = (bullish_upper[idx_bull_final] + bullish_lower[idx_bull_final]) / 2.0
     ce_level[idx_bear_final] = (bearish_upper[idx_bear_final] + bearish_lower[idx_bear_final]) / 2.0
 
-    # Mitigation
+    # Mitigation — scalable: single Numba pass for all thresholds if available
     if compute_mitigation:
-        mitigated, mitigated_index = _compute_mitigation_vectorized(
-            h, lo, bullish, bearish, bullish_upper, bullish_lower, bearish_upper, bearish_lower
-        )
-        # 50% CE: low <= CE (bull), high >= CE (bear)
-        cl_for_thresh = np.full(n, np.nan) if close is None else _to_float64(close)
-        mitigated_50, mitigated_50_index = _compute_threshold_mitigation(
-            h, lo, cl_for_thresh,
-            bullish, bearish,
-            ce_level, ce_level,
-            "low_le", "high_ge"
-        )
-        # Full fill: low <= bullish_lower, high >= bearish_upper
-        mitigated_full, mitigated_full_index = _compute_threshold_mitigation(
-            h, lo, cl_for_thresh,
-            bullish, bearish,
-            bullish_lower, bearish_upper,
-            "low_le", "high_ge"
-        )
-        # Inverted (IFVG): close beyond opposite side
+        mitigated = np.zeros(n, dtype=bool)
+        mitigated_index = np.full(n, -1, dtype=np.int64)
+        mitigated_50 = np.zeros(n, dtype=bool)
+        mitigated_50_index = np.full(n, -1, dtype=np.int64)
+        mitigated_full = np.zeros(n, dtype=bool)
+        mitigated_full_index = np.full(n, -1, dtype=np.int64)
         inverted = np.zeros(n, dtype=bool)
-        if close is not None:
-            cl_arr = _to_float64(close)
-            for idx in np.where(bullish)[0]:
-                if mitigated_full[idx]:
-                    mi = int(mitigated_full_index[idx])
-                    if mi != -1 and mi < n and cl_arr[mi] < bullish_lower[idx]:
-                        inverted[idx] = True
-            for idx in np.where(bearish)[0]:
-                if mitigated_full[idx]:
-                    mi = int(mitigated_full_index[idx])
-                    if mi != -1 and mi < n and cl_arr[mi] > bearish_upper[idx]:
-                        inverted[idx] = True
+        bull_idx = np.where(bullish)[0].astype(np.int64)
+        bear_idx = np.where(bearish)[0].astype(np.int64)
+        cl_arr = np.full(n, np.nan, dtype=np.float64) if close is None else _to_float64(close)
+        if _HAS_NUMBA and n > 0 and (bull_idx.size > 0 or bear_idx.size > 0):
+            # Numba single scan for all thresholds (mit, CE50, full, inverted) — O(n + g*avg_dist) with early break
+            if bull_idx.size > 0:
+                _fvg_first_idx_three_numba(
+                    n, bull_idx, bullish_upper, ce_level, bullish_lower, lo, h, cl_arr,
+                    mitigated, mitigated_index, mitigated_50, mitigated_50_index, mitigated_full, mitigated_full_index, inverted, True,
+                )
+            if bear_idx.size > 0:
+                _fvg_first_idx_three_numba(
+                    n, bear_idx, bearish_lower, ce_level, bearish_upper, lo, h, cl_arr,
+                    mitigated, mitigated_index, mitigated_50, mitigated_50_index, mitigated_full, mitigated_full_index, inverted, False,
+                )
         else:
-            inverted = mitigated_full.copy()
+            # Fallback: Python per-gap with reverse-cum flag + 1-D scan (still O(g*n) but low memory)
+            # Use existing helpers but share flag logic to avoid triple work
+            mitigated, mitigated_index = _compute_mitigation_vectorized(
+                h, lo, bullish, bearish, bullish_upper, bullish_lower, bearish_upper, bearish_lower
+            )
+            mitigated_50, mitigated_50_index = _compute_threshold_mitigation(
+                h, lo, cl_arr, bullish, bearish, ce_level, ce_level, "low_le", "high_ge"
+            )
+            mitigated_full, mitigated_full_index = _compute_threshold_mitigation(
+                h, lo, cl_arr, bullish, bearish, bullish_lower, bearish_upper, "low_le", "high_ge"
+            )
+            if close is not None:
+                for idx in np.where(bullish)[0]:
+                    if mitigated_full[idx]:
+                        mi = int(mitigated_full_index[idx])
+                        if mi != -1 and mi < n and cl_arr[mi] < bullish_lower[idx]:
+                            inverted[idx] = True
+                for idx in np.where(bearish)[0]:
+                    if mitigated_full[idx]:
+                        mi = int(mitigated_full_index[idx])
+                        if mi != -1 and mi < n and cl_arr[mi] > bearish_upper[idx]:
+                            inverted[idx] = True
+            else:
+                inverted = mitigated_full.copy()
     else:
         mitigated = np.zeros(n, dtype=bool)
         mitigated_index = np.full(n, -1, dtype=np.int64)

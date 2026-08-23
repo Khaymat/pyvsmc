@@ -2,14 +2,16 @@
 
 [![Python Version](https://img.shields.io/badge/python-%3E%3D3.10-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-orange.svg)](https://pypi.org/project/pyvsmc/)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#testing)
-[![Type Checked](https://img.shields.io/badge/mypy-strict-blue.svg)](#type-safety)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.3.1-orange.svg)](https://pypi.org/project/pyvsmc/)
+[![Tests](https://img.shields.io/badge/tests-92%20passed-brightgreen.svg)](#testing)
+[![Type Checked](https://img.shields.io/badge/mypy-strict-blue.svg)](#testing)
 [![Ruff](https://img.shields.io/badge/lint-ruff-red.svg)](https://github.com/astral-sh/ruff)
 
-**Ultra-fast, fully vectorized market structure & Smart Money Concepts (SMC) for Python.**
+**High-performance NumPy/Numba market-structure engine for Smart Money Concepts (SMC).**
 
-`pyvsmc` provides pure NumPy + Polars implementations of the most widely used SMC / ICT concepts — Fair Value Gaps, fractal swings, Break of Structure (BOS), Change of Character (CHOCH), and Order Blocks — with **zero Python for-loops over time-series**, strict typing, and a clean Polars plugin.
+`pyvsmc` provides NumPy/Numba + Polars implementations of SMC/ICT concepts — Fair Value Gaps, fractal swings, BOS/CHOCH, Order Blocks, Liquidity sweeps, Premium/Discount & OTE — with appropriate data structures and low asymptotic complexity.
+
+Architecture: NumPy for bulk transforms, Numba `njit(cache=True)` for stateful/first-passage scans, Polars for DataFrame integration. Not “zero loops” — correctness and complexity first.
 
 ---
 
@@ -17,16 +19,17 @@
 
 | Module | Concept | Key Function |
 |--------|---------|--------------|
-| `fvg` | Fair Value Gap / Imbalance | `detect_fvg()` |
+| `fvg` | Fair Value Gap / Imbalance + CE 50% + IFVG | `detect_fvg()` |
 | `swings` | Fractal Swing Highs & Lows | `detect_swings()` |
-| `structure` | BOS & CHOCH Engine | `detect_structure()` |
-| `order_blocks` | Order Block Zones | `detect_order_blocks()` |
+| `structure` | BOS & CHOCH (first-cross, break_mode) | `detect_structure()` |
+| `order_blocks` | Order Block + zone_mode + breaker | `detect_order_blocks()` |
+| `liquidity` | Equal highs/lows (swing-based) + sweeps | `detect_liquidity()` |
+| `zones` | Premium/Discount + OTE 0.618/0.705/0.786 | `detect_zones()` |
 | `polars_ext` | Polars `.smc` namespace | `df.smc.add_all()` |
 
-- **Performance:** 100% vectorized (`NumPy` / `Polars` vector expressions). No `.iterrows()`, `.apply()`, or Python loops over bars. Handles 100k+ candles in milliseconds.
-- **Type Safety:** Strict `mypy` — all public APIs are fully typed with Google-style docstrings.
-- **Polars Native:** Optional `pl.DataFrame.smc.*` namespace + `add_smc_columns()` helper.
-- **Tested:** Comprehensive `pytest` suite covering normal, edge (empty, flat, NaN, length < 3), and benchmark cases.
+- **Correctness:** Strict `mypy`, NaN-aware, first-cross BOS, CE50/full/inverted tracking.
+- **Polars:** `pl.DataFrame.smc.*` + `add_smc_columns()`; `fvg`/`swings` have native `LazyFrame` expr, other modules fallback honest `collect()` (documented).
+- **Tested:** 92 tests covering empty, flat, NaN, dense gaps, mitigation, EQH/EQL, OTE, LazyFrame.
 
 ---
 
@@ -39,9 +42,9 @@ pip install pyvsmc
 With Polars (recommended):
 
 ```bash
-pip install "pyvsmc[dev]"   # includes polars, pytest, ruff, mypy
+pip install "pyvsmc[dev]"   # includes polars, pytest, ruff, mypy, numba
 # or
-pip install pyvsmc polars
+pip install pyvsmc polars numba
 ```
 
 From source:
@@ -52,7 +55,7 @@ cd pyvsmc
 pip install -e ".[dev]"
 ```
 
-**Requirements:** Python >= 3.10, `numpy>=1.24.0`, `polars>=0.20.0` (optional but recommended).
+**Requirements:** Python >=3.10, `numpy>=1.24.0`, `polars>=0.20.0` (optional), `numba>=0.56` (optional, for JIT).
 
 ---
 
@@ -64,33 +67,30 @@ pip install -e ".[dev]"
 import numpy as np
 import pyvsmc as smc
 
-# OHLC arrays (float)
 high  = np.array([10.0, 11.2, 10.8, 12.5, 11.0, 13.0])
 low   = np.array([ 9.5,  9.8, 10.0, 11.8, 10.5, 12.2])
 close = np.array([10.0, 10.5, 10.2, 12.2, 11.1, 12.8])
 open_ = np.array([ 9.8, 10.0, 10.4, 11.0, 11.5, 12.0])
 
-# 1. Fair Value Gaps (with mitigation tracking)
-fvg = smc.detect_fvg(high, low, min_gap_size=0.3, compute_mitigation=True)
-print(fvg.bullish)          # boolean mask
-print(fvg.bullish_upper)    # upper boundary (Low[i])
-print(fvg.mitigated)        # has price revisited the gap?
+# 1. FVG + CE/IFVG
+fvg = smc.detect_fvg(high, low, close=close, compute_mitigation=True)
+print(fvg.bullish, fvg.ce_level, fvg.mitigated_50, fvg.inverted)
 
-# 2. Fractal Swings
+# 2. Swings
 swings = smc.detect_swings(high, low, window_size=2)
-print(swings.swing_high)       # True where High[i] == max(window)
-print(swings.swing_high_price)
 
-# 3. Market Structure — BOS & CHOCH
-structure = smc.detect_structure(high, low, close, window_size=2)
-print(structure.bos_bullish)    # continuation breaks
-print(structure.choch_bearish)  # reversal breaks
-print(structure.trend)          # 1=bull, -1=bear, 0=neutral
+# 3. Structure — break_mode close/wick/both, first-cross
+structure = smc.detect_structure(high, low, close, window_size=2, break_mode="close")
+print(structure.bos_bullish, structure.trend)
 
-# 4. Order Blocks
-obs = smc.detect_order_blocks(open_, high, low, close, lookback=5)
-print(obs.bullish_ob)  # True at the bearish candle before a bullish impulse
-print(obs.ob_high, obs.ob_low)
+# 4. Order Blocks — zone_mode full/body/mean_threshold + breaker
+obs = smc.detect_order_blocks(open_, high, low, close, lookback=5, zone_mode="body", compute_mitigation=True)
+print(obs.bullish_ob, obs.is_breaker)
+
+# 5. Liquidity + Zones
+liq = smc.detect_liquidity(high, low, close, equal_threshold=0.001)
+zones = smc.detect_zones(high, low, close)
+print(liq.equal_swing_high, liq.sweep_high, zones.in_ote)
 ```
 
 ### Polars API
@@ -99,69 +99,50 @@ print(obs.ob_high, obs.ob_low)
 import polars as pl
 import pyvsmc  # registers .smc namespace
 
-df = pl.DataFrame({
-    "open":  open_,
-    "high":  high,
-    "low":   low,
-    "close": close,
-    "volume": [100, 120, 80, 200, 150, 180],
-})
+df = pl.DataFrame({"open": open_, "high": high, "low": low, "close": close})
 
-# Functional helper — adds all SMC columns at once
+# Eager
 from pyvsmc.polars_ext import add_smc_columns
 df = add_smc_columns(df, window_size=2, fvg_mitigation=True)
+# Lazy (fvg/swings native, others collect fallback)
+ldf = df.lazy()
+ldf = ldf.pipe(lambda d: pyvsmc.fvg_polars(d))  # native expr
 
-# Or via the .smc namespace (more granular)
+# Namespace
 df = pl.DataFrame({"open": open_, "high": high, "low": low, "close": close})
-df = df.smc.add_all(window_size=2, ob_lookback=10)
+df = df.smc.add_all(window_size=2, include_liquidity=True)
 df = df.smc.fvg(min_gap_size=0.5)
 df = df.smc.swings(window_size=2)
-df = df.smc.structure(window_size=2)
-df = df.smc.order_blocks(lookback=5)
-
-print(df)
-```
-
-### Re-using Swings in Structure
-
-```python
-from pyvsmc.swings import detect_swings
-from pyvsmc.structure import detect_structure
-
-swings = detect_swings(high, low, window_size=3)
-structure = detect_structure(
-    high, low, close,
-    swing_high=swings.swing_high,
-    swing_low=swings.swing_low,
-)
+df = df.smc.structure(window_size=2, break_mode="wick")
+df = df.smc.order_blocks(lookback=5, zone_mode="body")
+df = df.smc.liquidity(equal_threshold=0.001)
+df = df.smc.zones(eq_threshold=0.02)
 ```
 
 ---
 
 ## API Reference
 
-### `detect_fvg(high, low, min_gap_size=None, min_gap_size_pct=None, *, compute_mitigation=False)`
-
-Detects 3-candle Fair Value Gaps.
-
-- **Bullish FVG:** `Low[i] > High[i-2]` — gap zone `[High[i-2], Low[i]]`
-- **Bearish FVG:** `High[i] < Low[i-2]` — gap zone `[High[i], Low[i-2]]`
-
-Returns `FVGResult` with `bullish`, `bearish`, `bullish_upper/lower`, `bearish_upper/lower`, `gap_size`, `gap_size_pct`, `mitigated`, `mitigated_index`.
+### `detect_fvg(high, low, min_gap_size=None, min_gap_size_pct=None, *, compute_mitigation=False, close=None)`
+Bullish `Low[i] > High[i-2]` `[High[i-2], Low[i]]`, Bearish `High[i] < Low[i-2]`.
+Returns `FVGResult` with `bullish/bearish`, `bullish_upper/lower`, `ce_level`, `gap_size`, `mitigated/mitigated_50/mitigated_full/inverted` + indices. `close` enables IFVG.
 
 ### `detect_swings(high, low, window_size=2)`
+`High[i]==max(window)`, `Low[i]==min(window)`. Returns `SwingResult`.
 
-Fractal swing detection. `High[i] == max(High[i-N:i+N+1])`, `Low[i] == min(Low[i-N:i+N+1])`. Returns `SwingResult`.
+### `detect_structure(high, low, close, window_size=2, *, break_mode="close")`
+`break_mode="close"|"wick"|"both"`, first-cross only. Returns `bos_bullish/bearish`, `choch_*`, `bos_level`, `trend`.
 
-### `detect_structure(high, low, close, window_size=2, *, swing_high=None, swing_low=None)`
+### `detect_order_blocks(open_, high, low, close, *, lookback=10, zone_mode="full", compute_mitigation=False)`
+`zone_mode="full"|"body"|"mean_threshold"`. Returns `bullish_ob/bearish_ob`, `ob_high/low`, `mitigated/is_breaker`.
 
-BOS (continuation) vs CHOCH (reversal) classification with trend tracking. Returns `StructureResult` with `bos_bullish/bearish`, `choch_bullish/bearish`, `bos_level`, `choch_level`, `trend`.
+### `detect_liquidity(high, low, close, *, equal_threshold=0.001, sweep_lookback=20, window_size=2)`
+Returns `equal_high/low` (adjacent) + `equal_swing_high/low` (EQH/EQL), `sweep_high/low`.
 
-### `detect_order_blocks(open_, high, low, close, *, lookback=10, ...)`
+### `detect_zones(high, low, close, window_size=2, eq_threshold=0.02)`
+Returns `premium/discount/equilibrium`, `range_high/low`, `ote_high/low/705`, `in_ote`.
 
-Finds last opposing candle before FVG/BOS impulses. Returns `OrderBlockResult` with `bullish_ob/bearish_ob`, `ob_high/low`, `validated_index`, `impulse_type`.
-
-All functions also have `*_polars(df, ...)` variants and are available via `df.smc.*`.
+All have `*_polars` variants. Polars `add_smc_columns` params: `include_*`, `fvg_mitigation`, `break_mode`, `zone_mode` (see `polars_ext.py`).
 
 ---
 
@@ -195,22 +176,41 @@ pyvsmc/
 │   ├── swings.py
 │   ├── structure.py
 │   ├── order_blocks.py
+│   ├── liquidity.py
+│   ├── zones.py
 │   └── polars_ext.py
+├── src/pysmc/          # shim deprecated → pyvsmc
+├── benchmarks/
+│   ├── bench.py
+│   └── results.json
 └── tests/
-    ├── test_fvg.py
+    ├── test_fvg.py + test_fvg_regression.py
     ├── test_swings.py
     ├── test_structure.py
     ├── test_order_blocks.py
+    ├── test_liquidity.py
+    ├── test_zones.py
     └── test_polars_ext.py
 ```
 
 ---
 
-## Performance Notes
+## Performance & Complexity
 
-- All indicators use `numpy.lib.stride_tricks.sliding_window_view`, `np.maximum.accumulate`, broadcasting, and chunked evaluation — **no Python loops over bars**.
-- The single exception is the BOS/CHOCH trend tracker, which requires sequential state. It is JIT-compiled with `numba` when available and falls back to a single O(n) scan otherwise.
-- Benchmark: ~100k candles — FVG < 10ms, swings < 20ms, structure < 30ms (CPython 3.11, NumPy 1.26).
+**Benchmark 0.3.1** (synthetic OHLC, `window_size=2`, 3 runs median, `tracemalloc` peak):
+
+| n | swings | fvg | fvg+mit | struct | OB | liquidity | zones | polars eager |
+|---|---|---|---|---|---|---|---|---|
+| 1k | 0.79ms | 1.16ms | 1.96ms | 17.5ms* | 19.6ms | 11ms | 1.79ms | 58ms |
+| 10k | 2.57ms | 1.90ms | 2.40ms | 19.7ms* | 28.8ms | 154ms | 4.5ms | 206ms |
+| 100k | 23ms | 8.4ms | 19ms** | 47ms | 74ms | 1306ms | 39ms | 1452ms |
+
+`* struct cold JIT ~15ms, warm 47ms/100k`, `** fvg_mit 0.3.1 Numba single-scan, 0.3.0 SKIP`
+
+**Complexity:**
+- `swings` `O(n)`, `fvg` w/o mit `O(n)`, `fvg+mit` `O(n + g·d)` (`g` gaps, `d` avg distance, Numba early-break, worst `O(g·n)` documented), `structure` `O(n)` Numba `cache=True`, `OB` `O(m·L)` bounded `L=lookback`, `liquidity EQH` `O(s)` vectorized diff.
+
+**Limitations:** `fvg mit` with `g=Θ(n)` still worst `O(n²)` — avoid `compute_mitigation=True` on 500k+ dense gaps; `polars Lazy` for `fvg/swings` native, others fallback `collect()`; `order_blocks` many impulses → `lookback` bound.
 
 ---
 
@@ -220,13 +220,11 @@ pyvsmc/
 
 `pyvsmc` is an **open-source analytics and research library**. It is provided solely for **educational, informational, and research purposes**.
 
-- **Not Financial Advice.** Nothing in this library, its documentation, examples, or outputs constitutes financial, investment, trading, or other professional advice. No recommendation to buy, sell, or hold any financial instrument is made or implied.
-- **No Warranty of Accuracy or Fitness.** Market structure and Smart Money Concepts are *interpretive frameworks*; their definitions vary across practitioners. The library implements one set of rules that may not match your trading methodology. Outputs may be incorrect, incomplete, or inappropriate for your use case.
-- **Use at Your Own Risk.** Trading and investing involve substantial risk of loss, including loss of principal. Past simulated or historical performance is not indicative of future results. You are solely responsible for your own trading decisions, risk management, and compliance with applicable laws and regulations.
-- **No Liability.** To the fullest extent permitted by law, the authors, contributors, and distributors of `pyvsmc` disclaim all liability for any loss, damage, cost, or expense arising directly or indirectly from use of this software.
-- **Do Your Own Research (DYOR).** Always validate any signal or analysis with independent research, additional data sources, and, where appropriate, advice from a qualified professional.
-
-By using this software you acknowledge that you have read, understood, and agree to this disclaimer.
+- **Not Financial Advice.** Nothing in this library, its documentation, examples, or outputs constitutes financial, investment, trading, or other professional advice.
+- **No Warranty of Accuracy or Fitness.** SMC are interpretive frameworks.
+- **Use at Your Own Risk.** Trading involves substantial risk of loss.
+- **No Liability.** Authors disclaim all liability.
+- **Do Your Own Research (DYOR).**
 
 ---
 
@@ -236,12 +234,6 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 Copyright (c) 2026 pyvsmc contributors.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 ---
 
 ## Contributing
@@ -250,4 +242,4 @@ Issues and pull requests are welcome. Please run `ruff`, `mypy`, and `pytest` be
 
 ## Acknowledgements
 
-Built with [NumPy](https://numpy.org) and [Polars](https://pola.rs). SMC concepts as described by the broader ICT / Smart Money community.
+Built with [NumPy](https://numpy.org), [Numba](https://numba.pydata.org) and [Polars](https://pola.rs). SMC concepts as described by the broader ICT / Smart Money community.
