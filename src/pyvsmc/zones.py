@@ -26,6 +26,10 @@ class ZoneResult:
         range_high: Forward-filled last swing high (top of range)
         range_low: Forward-filled last swing low (bottom)
         equilibrium_level: (high+low)/2
+        ote_high: OTE 0.786 level (premium deep)
+        ote_low: OTE 0.618 level
+        ote_705: OTE 0.705 sweet spot
+        in_ote: Close inside OTE zone [0.618, 0.786]
         premium_level: top of premium (same as range_high)
         discount_level: bottom of discount (range_low)
     """
@@ -36,6 +40,10 @@ class ZoneResult:
     range_high: npt.NDArray[np.float64]
     range_low: npt.NDArray[np.float64]
     equilibrium_level: npt.NDArray[np.float64]
+    ote_high: npt.NDArray[np.float64]
+    ote_low: npt.NDArray[np.float64]
+    ote_705: npt.NDArray[np.float64]
+    in_ote: npt.NDArray[np.bool_]
 
 
 def _to_f(a: npt.ArrayLike) -> npt.NDArray[np.float64]:
@@ -82,7 +90,7 @@ def detect_zones(
     if window_size < 1:
         raise ValueError("window_size >=1")
     if n==0:
-        return ZoneResult(premium=np.zeros(0,dtype=bool),discount=np.zeros(0,dtype=bool),equilibrium=np.zeros(0,dtype=bool),range_high=np.zeros(0,dtype=np.float64),range_low=np.zeros(0,dtype=np.float64),equilibrium_level=np.zeros(0,dtype=np.float64))
+        return ZoneResult(premium=np.zeros(0,dtype=bool),discount=np.zeros(0,dtype=bool),equilibrium=np.zeros(0,dtype=bool),range_high=np.zeros(0,dtype=np.float64),range_low=np.zeros(0,dtype=np.float64),equilibrium_level=np.zeros(0,dtype=np.float64),ote_high=np.zeros(0,dtype=np.float64),ote_low=np.zeros(0,dtype=np.float64),ote_705=np.zeros(0,dtype=np.float64),in_ote=np.zeros(0,dtype=bool))
     swings = detect_swings(h, lo, window_size=window_size)
     sh = _ffill_last_swing(swings.swing_high, h)
     sl = _ffill_last_swing(swings.swing_low, lo)
@@ -105,7 +113,16 @@ def detect_zones(
     # premium: close > eq and not equilibrium
     premium[valid & (cl > eq) & ~is_eq] = True
     discount[valid & (cl < eq) & ~is_eq] = True
-    return ZoneResult(premium, discount, equilibrium, rh, rl, eq)
+    # OTE levels: 0.618, 0.705, 0.786 of range from low
+    ote_low = np.full(n, np.nan, dtype=np.float64)
+    ote_705 = np.full(n, np.nan, dtype=np.float64)
+    ote_high = np.full(n, np.nan, dtype=np.float64)
+    ote_low[valid] = rl[valid] + 0.618 * rng[valid]
+    ote_705[valid] = rl[valid] + 0.705 * rng[valid]
+    ote_high[valid] = rl[valid] + 0.786 * rng[valid]
+    in_ote = np.zeros(n, dtype=bool)
+    in_ote[valid] = (cl[valid] >= ote_low[valid]) & (cl[valid] <= ote_high[valid])
+    return ZoneResult(premium, discount, equilibrium, rh, rl, eq, ote_high, ote_low, ote_705, in_ote)
 
 
 def zones_polars(df: object, *, high_col="high", low_col="low", close_col="close", window_size=2, eq_threshold=0.02) -> object:
@@ -116,4 +133,4 @@ def zones_polars(df: object, *, high_col="high", low_col="low", close_col="close
     if not isinstance(df, pl.DataFrame):
         raise TypeError(f"Expected pl.DataFrame, got {type(df)}")
     res = detect_zones(df[high_col].to_numpy().astype(float), df[low_col].to_numpy().astype(float), df[close_col].to_numpy().astype(float), window_size=window_size, eq_threshold=eq_threshold)
-    return df.with_columns([pl.Series("premium", res.premium), pl.Series("discount", res.discount), pl.Series("equilibrium", res.equilibrium), pl.Series("range_high", res.range_high), pl.Series("range_low", res.range_low), pl.Series("equilibrium_level", res.equilibrium_level)])
+    return df.with_columns([pl.Series("premium", res.premium), pl.Series("discount", res.discount), pl.Series("equilibrium", res.equilibrium), pl.Series("range_high", res.range_high), pl.Series("range_low", res.range_low), pl.Series("equilibrium_level", res.equilibrium_level), pl.Series("ote_high", res.ote_high), pl.Series("ote_low", res.ote_low), pl.Series("ote_705", res.ote_705), pl.Series("in_ote", res.in_ote)])

@@ -38,11 +38,17 @@ class FVGResult:
         bearish_lower: Lower boundary of bearish gap (High[i]); ``np.nan`` elsewhere.
         gap_size: Absolute gap size (upper - lower) for detected gaps; ``np.nan`` elsewhere.
         gap_size_pct: Gap size as percentage of lower boundary; ``np.nan`` elsewhere.
+        ce_level: Consequent Encroachment 50% level ((upper+lower)/2); ``np.nan`` elsewhere.
         mitigated: Boolean mask — ``True`` where a gap has been mitigated
             (price pierced the zone) at any future bar.  All ``False`` when
             mitigation is not computed.
         mitigated_index: Index of the first mitigation bar for each FVG;
             ``-1`` when not mitigated or not computed.
+        mitigated_50: True where price reached 50% CE level.
+        mitigated_50_index: Index of first 50% mitigation.
+        mitigated_full: True where price fully filled gap (beyond opposite side).
+        mitigated_full_index: Index of first full fill.
+        inverted: True where FVG was inverted (close beyond opposite side after mitigation) — IFVG.
     """
 
     bullish: npt.NDArray[np.bool_]
@@ -53,8 +59,14 @@ class FVGResult:
     bearish_lower: npt.NDArray[np.float64]
     gap_size: npt.NDArray[np.float64]
     gap_size_pct: npt.NDArray[np.float64]
+    ce_level: npt.NDArray[np.float64]
     mitigated: npt.NDArray[np.bool_]
     mitigated_index: npt.NDArray[np.int64]
+    mitigated_50: npt.NDArray[np.bool_]
+    mitigated_50_index: npt.NDArray[np.int64]
+    mitigated_full: npt.NDArray[np.bool_]
+    mitigated_full_index: npt.NDArray[np.int64]
+    inverted: npt.NDArray[np.bool_]
 
 
 def _to_float64(arr: npt.ArrayLike) -> npt.NDArray[np.float64]:
@@ -182,6 +194,101 @@ def _compute_mitigation_vectorized(
     return mitigated, mitigated_idx
 
 
+def _compute_threshold_mitigation(
+    high: npt.NDArray[np.float64],
+    low: npt.NDArray[np.float64],
+    close: npt.NDArray[np.float64],
+    bullish: npt.NDArray[np.bool_],
+    bearish: npt.NDArray[np.bool_],
+    bull_thresh: npt.NDArray[np.float64],
+    bear_thresh: npt.NDArray[np.float64],
+    bull_cond: str = "low_le",
+    bear_cond: str = "high_ge",
+) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.int64]]:
+    """Generic threshold mitigation (vectorized for CE/full)."""
+    n = high.shape[0]
+    mitigated = np.zeros(n, dtype=bool)
+    mitigated_idx = np.full(n, -1, dtype=np.int64)
+    if n < 3:
+        return mitigated, mitigated_idx
+    # Use future min/max trick for flag, then chunked search
+    rev_cummin_low = np.empty(n + 1, dtype=np.float64)
+    rev_cummin_low[n] = np.inf
+    if n > 0:
+        rev_cummin_low[:n] = np.minimum.accumulate(low[::-1])[::-1]
+    rev_cummax_high = np.empty(n + 1, dtype=np.float64)
+    rev_cummax_high[n] = -np.inf
+    if n > 0:
+        rev_cummax_high[:n] = np.maximum.accumulate(high[::-1])[::-1]
+    rev_cummin_close = np.empty(n + 1, dtype=np.float64)
+    rev_cummin_close[n] = np.inf
+    if n > 0:
+        rev_cummin_close[:n] = np.minimum.accumulate(close[::-1])[::-1]
+    rev_cummax_close = np.empty(n + 1, dtype=np.float64)
+    rev_cummax_close[n] = -np.inf
+    if n > 0:
+        rev_cummax_close[:n] = np.maximum.accumulate(close[::-1])[::-1]
+    bull_idx = np.where(bullish)[0]
+    bear_idx = np.where(bearish)[0]
+    # flag
+    if bull_idx.size > 0:
+        # choose cond
+        if bull_cond == "low_le":
+            future = rev_cummin_low[bull_idx + 1]
+            flag = future <= bull_thresh[bull_idx]
+        elif bull_cond == "close_lt":
+            future = rev_cummin_close[bull_idx + 1]
+            flag = future < bull_thresh[bull_idx]
+        else:
+            flag = np.zeros_like(bull_idx, dtype=bool)
+        mitigated[bull_idx[flag]] = True
+    if bear_idx.size > 0:
+        if bear_cond == "high_ge":
+            future = rev_cummax_high[bear_idx + 1]
+            flag = future >= bear_thresh[bear_idx]
+        elif bear_cond == "close_gt":
+            future = rev_cummax_close[bear_idx + 1]
+            flag = future > bear_thresh[bear_idx]
+        else:
+            flag = np.zeros_like(bear_idx, dtype=bool)
+        mitigated[bear_idx[flag]] = True
+    # chunked search for index
+    chunk_size = 1024
+    if bull_idx.size > 0:
+        b_m = bull_idx[mitigated[bull_idx]]
+        for start in range(0, b_m.size, chunk_size):
+            chunk = b_m[start : start + chunk_size]
+            thresh_col = bull_thresh[chunk][:, None]
+            if bull_cond == "low_le":
+                row = low[None, :]
+                pierce = row <= thresh_col
+            else:
+                row = close[None, :]
+                pierce = row < thresh_col
+            idx_col = chunk[:, None]
+            j = np.arange(n)[None, :]
+            pierce &= j > idx_col
+            first = np.argmax(pierce, axis=1)
+            mitigated_idx[chunk] = first.astype(np.int64)
+    if bear_idx.size > 0:
+        b_m = bear_idx[mitigated[bear_idx]]
+        for start in range(0, b_m.size, chunk_size):
+            chunk = b_m[start : start + chunk_size]
+            thresh_col = bear_thresh[chunk][:, None]
+            if bear_cond == "high_ge":
+                row = high[None, :]
+                pierce = row >= thresh_col
+            else:
+                row = close[None, :]
+                pierce = row > thresh_col
+            idx_col = chunk[:, None]
+            j = np.arange(n)[None, :]
+            pierce &= j > idx_col
+            first = np.argmax(pierce, axis=1)
+            mitigated_idx[chunk] = first.astype(np.int64)
+    return mitigated, mitigated_idx
+
+
 def detect_fvg(
     high: npt.ArrayLike,
     low: npt.ArrayLike,
@@ -221,7 +328,6 @@ def detect_fvg(
         >>> res.bullish
         array([False, False, False, False,  True])
     """
-    _ = close  # reserved
     h = _to_float64(high)
     lo = _to_float64(low)
 
@@ -243,6 +349,7 @@ def detect_fvg(
     bearish_lower = np.full(n, np.nan, dtype=np.float64)
     gap_size = np.full(n, np.nan, dtype=np.float64)
     gap_size_pct = np.full(n, np.nan, dtype=np.float64)
+    ce_level = np.full(n, np.nan, dtype=np.float64)
 
     if n < 3:
         return FVGResult(
@@ -254,8 +361,14 @@ def detect_fvg(
             bearish_lower=bearish_lower,
             gap_size=gap_size,
             gap_size_pct=gap_size_pct,
+            ce_level=ce_level,
             mitigated=np.zeros(n, dtype=bool),
             mitigated_index=np.full(n, -1, dtype=np.int64),
+            mitigated_50=np.zeros(n, dtype=bool),
+            mitigated_50_index=np.full(n, -1, dtype=np.int64),
+            mitigated_full=np.zeros(n, dtype=bool),
+            mitigated_full_index=np.full(n, -1, dtype=np.int64),
+            inverted=np.zeros(n, dtype=bool),
         )
 
     # Vectorized core logic — no Python loops over time-series
@@ -354,14 +467,54 @@ def detect_fvg(
     gap_size_pct[idx_bull_final] = tmp_pct[idx_bull_final]
     gap_size_pct[idx_bear_final] = tmp_pct[idx_bear_final]
 
+    # CE 50% level
+    ce_level[idx_bull_final] = (bullish_upper[idx_bull_final] + bullish_lower[idx_bull_final]) / 2.0
+    ce_level[idx_bear_final] = (bearish_upper[idx_bear_final] + bearish_lower[idx_bear_final]) / 2.0
+
     # Mitigation
     if compute_mitigation:
         mitigated, mitigated_index = _compute_mitigation_vectorized(
             h, lo, bullish, bearish, bullish_upper, bullish_lower, bearish_upper, bearish_lower
         )
+        # 50% CE: low <= CE (bull), high >= CE (bear)
+        cl_for_thresh = np.full(n, np.nan) if close is None else _to_float64(close)
+        mitigated_50, mitigated_50_index = _compute_threshold_mitigation(
+            h, lo, cl_for_thresh,
+            bullish, bearish,
+            ce_level, ce_level,
+            "low_le", "high_ge"
+        )
+        # Full fill: low <= bullish_lower, high >= bearish_upper
+        mitigated_full, mitigated_full_index = _compute_threshold_mitigation(
+            h, lo, cl_for_thresh,
+            bullish, bearish,
+            bullish_lower, bearish_upper,
+            "low_le", "high_ge"
+        )
+        # Inverted (IFVG): close beyond opposite side
+        inverted = np.zeros(n, dtype=bool)
+        if close is not None:
+            cl_arr = _to_float64(close)
+            for idx in np.where(bullish)[0]:
+                if mitigated_full[idx]:
+                    mi = int(mitigated_full_index[idx])
+                    if mi != -1 and mi < n and cl_arr[mi] < bullish_lower[idx]:
+                        inverted[idx] = True
+            for idx in np.where(bearish)[0]:
+                if mitigated_full[idx]:
+                    mi = int(mitigated_full_index[idx])
+                    if mi != -1 and mi < n and cl_arr[mi] > bearish_upper[idx]:
+                        inverted[idx] = True
+        else:
+            inverted = mitigated_full.copy()
     else:
         mitigated = np.zeros(n, dtype=bool)
         mitigated_index = np.full(n, -1, dtype=np.int64)
+        mitigated_50 = np.zeros(n, dtype=bool)
+        mitigated_50_index = np.full(n, -1, dtype=np.int64)
+        mitigated_full = np.zeros(n, dtype=bool)
+        mitigated_full_index = np.full(n, -1, dtype=np.int64)
+        inverted = np.zeros(n, dtype=bool)
 
     return FVGResult(
         bullish=bullish,
@@ -372,8 +525,14 @@ def detect_fvg(
         bearish_lower=bearish_lower,
         gap_size=gap_size,
         gap_size_pct=gap_size_pct,
+        ce_level=ce_level,
         mitigated=mitigated,
         mitigated_index=mitigated_index,
+        mitigated_50=mitigated_50,
+        mitigated_50_index=mitigated_50_index,
+        mitigated_full=mitigated_full,
+        mitigated_full_index=mitigated_full_index,
+        inverted=inverted,
     )
 
 
@@ -389,6 +548,7 @@ def fvg_polars(
     *,
     high_col: str = "high",
     low_col: str = "low",
+    close_col: str | None = None,
     min_gap_size: float | None = None,
     min_gap_size_pct: float | None = None,
     compute_mitigation: bool = False,
@@ -415,12 +575,37 @@ def fvg_polars(
     except ImportError as e:
         raise ImportError("polars is required for fvg_polars; install with `pip install polars`") from e
 
+    if isinstance(df, pl.LazyFrame):
+        # Native Lazy Expr path (streaming, no numpy conversion) — supports basic FVG without mitigation
+        # For mitigation, fall back to collect (requires future scan)
+        if compute_mitigation or min_gap_size is not None or min_gap_size_pct is not None:
+            df_collected = df.collect()
+            return fvg_polars(df_collected, high_col=high_col, low_col=low_col, close_col=close_col, min_gap_size=min_gap_size, min_gap_size_pct=min_gap_size_pct, compute_mitigation=compute_mitigation)
+        # Pure lazy: low > high.shift(2) and high < low.shift(2)
+        bullish_expr = (pl.col(low_col) > pl.col(high_col).shift(2)).fill_null(False)
+        bearish_expr = (pl.col(high_col) < pl.col(low_col).shift(2)).fill_null(False)
+        # gap size expr not needed for filter (already handled)
+        return df.with_columns([
+            bullish_expr.alias("fvg_bullish"),
+            bearish_expr.alias("fvg_bearish"),
+            pl.when(bullish_expr).then(pl.col(low_col)).otherwise(None).alias("fvg_bullish_upper"),
+            pl.when(bullish_expr).then(pl.col(high_col).shift(2)).otherwise(None).alias("fvg_bullish_lower"),
+            pl.when(bearish_expr).then(pl.col(low_col).shift(2)).otherwise(None).alias("fvg_bearish_upper"),
+            pl.when(bearish_expr).then(pl.col(high_col)).otherwise(None).alias("fvg_bearish_lower"),
+            pl.when(bullish_expr | bearish_expr).then((pl.col(low_col) - pl.col(high_col).shift(2)).abs()).otherwise(None).alias("fvg_gap_size"),
+            pl.lit(None).alias("fvg_gap_size_pct"),
+            pl.when(bullish_expr | bearish_expr).then((pl.col(low_col) + pl.col(high_col).shift(2))/2).otherwise(None).alias("fvg_ce_level"),
+        ])
+
     if not isinstance(df, pl.DataFrame):
         raise TypeError(f"Expected polars.DataFrame, got {type(df)}")
 
     high = df[high_col].to_numpy().astype(float)
     low = df[low_col].to_numpy().astype(float)
-    res = detect_fvg(high, low, min_gap_size=min_gap_size, min_gap_size_pct=min_gap_size_pct, compute_mitigation=compute_mitigation)
+    close = None
+    if close_col is not None and close_col in df.columns:
+        close = df[close_col].to_numpy().astype(float)
+    res = detect_fvg(high, low, min_gap_size=min_gap_size, min_gap_size_pct=min_gap_size_pct, compute_mitigation=compute_mitigation, close=close)
 
     out = df.with_columns(
         [
@@ -432,6 +617,7 @@ def fvg_polars(
             pl.Series("fvg_bearish_lower", res.bearish_lower),
             pl.Series("fvg_gap_size", res.gap_size),
             pl.Series("fvg_gap_size_pct", res.gap_size_pct),
+            pl.Series("fvg_ce_level", res.ce_level),
         ]
     )
     if compute_mitigation:
@@ -439,6 +625,11 @@ def fvg_polars(
             [
                 pl.Series("fvg_mitigated", res.mitigated),
                 pl.Series("fvg_mitigated_index", res.mitigated_index),
+                pl.Series("fvg_mitigated_50", res.mitigated_50),
+                pl.Series("fvg_mitigated_50_index", res.mitigated_50_index),
+                pl.Series("fvg_mitigated_full", res.mitigated_full),
+                pl.Series("fvg_mitigated_full_index", res.mitigated_full_index),
+                pl.Series("fvg_inverted", res.inverted),
             ]
         )
     return out

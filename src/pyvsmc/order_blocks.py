@@ -51,6 +51,8 @@ class OrderBlockResult:
         impulse_type: What triggered the OB — ``"fvg"``, ``"bos"``, or ``""``.
         mitigated: True where zone later touched by price.
         mitigated_index: Index of first mitigation bar, -1 if never.
+        is_breaker: True where OB was invalidated (close beyond extreme) → breaker block.
+        breaker_index: Index of invalidation.
     """
 
     bullish_ob: npt.NDArray[np.bool_]
@@ -62,6 +64,8 @@ class OrderBlockResult:
     impulse_type: npt.NDArray[np.object_]
     mitigated: npt.NDArray[np.bool_]
     mitigated_index: npt.NDArray[np.int64]
+    is_breaker: npt.NDArray[np.bool_]
+    breaker_index: npt.NDArray[np.int64]
 
 
 def _to_float64(arr: npt.ArrayLike) -> npt.NDArray[np.float64]:
@@ -168,6 +172,7 @@ def detect_order_blocks(
     use_bos: bool = True,
     window_size: int = 2,
     compute_mitigation: bool = False,
+    zone_mode: str = "full",
 ) -> OrderBlockResult:
     """Detect Order Blocks — fully vectorized.
 
@@ -219,6 +224,8 @@ def detect_order_blocks(
         raise ValueError(f"open, high, low, close must have same length: {o.shape[0]}, {h.shape[0]}, {lo.shape[0]}, {cl.shape[0]}")
     if lookback < 1:
         raise ValueError(f"lookback must be >= 1, got {lookback}")
+    if zone_mode not in ("full", "body", "mean_threshold"):
+        raise ValueError(f"zone_mode must be 'full','body','mean_threshold', got {zone_mode}")
 
     bullish_ob = np.zeros(n, dtype=bool)
     bearish_ob = np.zeros(n, dtype=bool)
@@ -239,6 +246,8 @@ def detect_order_blocks(
             impulse_type=impulse_type,
             mitigated=np.zeros(n, dtype=bool),
             mitigated_index=np.full(n, -1, dtype=np.int64),
+            is_breaker=np.zeros(n, dtype=bool),
+            breaker_index=np.full(n, -1, dtype=np.int64),
         )
 
     # ---- Gather impulse indices ----
@@ -317,8 +326,15 @@ def detect_order_blocks(
                 continue
             # Also avoid overwriting a bearish OB at same anchor (should not happen normally, but if it does, keep both? We treat as bullish)
             bullish_ob[anchor] = True
-            ob_high[anchor] = h[anchor]
-            ob_low[anchor] = lo[anchor]
+            if zone_mode == "full":
+                ob_high[anchor] = h[anchor]
+                ob_low[anchor] = lo[anchor]
+            elif zone_mode == "body":
+                ob_high[anchor] = max(o[anchor], cl[anchor])
+                ob_low[anchor] = min(o[anchor], cl[anchor])
+            else:  # mean_threshold
+                ob_high[anchor] = max(o[anchor], cl[anchor])
+                ob_low[anchor] = (o[anchor] + cl[anchor]) / 2.0
             ob_type[anchor] = "bullish"
             validated_index[anchor] = imp_idx
             impulse_type[anchor] = imp_typ
@@ -349,8 +365,15 @@ def detect_order_blocks(
             bearish_ob[anchor] = True
             # If not already set by bullish, set boundaries and type
             if np.isnan(ob_high[anchor]):
-                ob_high[anchor] = h[anchor]
-                ob_low[anchor] = lo[anchor]
+                if zone_mode == "full":
+                    ob_high[anchor] = h[anchor]
+                    ob_low[anchor] = lo[anchor]
+                elif zone_mode == "body":
+                    ob_high[anchor] = max(o[anchor], cl[anchor])
+                    ob_low[anchor] = min(o[anchor], cl[anchor])
+                else:
+                    ob_high[anchor] = max(o[anchor], cl[anchor])
+                    ob_low[anchor] = (o[anchor] + cl[anchor]) / 2.0
             if ob_type[anchor] == "":
                 ob_type[anchor] = "bearish"
             elif ob_type[anchor] == "bullish":
@@ -367,30 +390,40 @@ def detect_order_blocks(
     # Mitigation: future price touching OB zone (vectorized)
     mitigated = np.zeros(n, dtype=bool)
     mitigated_index = np.full(n, -1, dtype=np.int64)
+    is_breaker = np.zeros(n, dtype=bool)
+    breaker_index = np.full(n, -1, dtype=np.int64)
     if compute_mitigation:
         ob_idx = np.where(bullish_ob | bearish_ob)[0]
         for anchor in ob_idx:
-            # start after validated impulse to avoid immediate self-mitigation, but also allow any future bar after anchor
             start = int(validated_index[anchor] + 1) if validated_index[anchor] != -1 else int(anchor + 1)
             if start >= n:
                 continue
             low_future = lo[start:]
             high_future = h[start:]
-            # bullish OB (demand) mitigated if low <= ob_high (touch)
-            # bearish OB (supply) mitigated if high >= ob_low
+            close_future = cl[start:]
             if bullish_ob[anchor]:
                 hit = np.where(low_future <= ob_high[anchor])[0]
                 if hit.size > 0:
                     mitigated[anchor] = True
                     mitigated_index[anchor] = int(start + hit[0])
+                # breaker if close < ob_low
+                b_hit = np.where(close_future < ob_low[anchor])[0]
+                if b_hit.size > 0:
+                    is_breaker[anchor] = True
+                    breaker_index[anchor] = int(start + b_hit[0])
             if bearish_ob[anchor]:
                 hit = np.where(high_future >= ob_low[anchor])[0]
                 if hit.size > 0:
-                    # if both bullish and bearish at same anchor, keep earliest hit
                     idx = int(start + hit[0])
                     if not mitigated[anchor] or idx < mitigated_index[anchor]:
                         mitigated[anchor] = True
                         mitigated_index[anchor] = idx
+                b_hit = np.where(close_future > ob_high[anchor])[0]
+                if b_hit.size > 0:
+                    idx = int(start + b_hit[0])
+                    if not is_breaker[anchor] or idx < breaker_index[anchor]:
+                        is_breaker[anchor] = True
+                        breaker_index[anchor] = idx
 
     return OrderBlockResult(
         bullish_ob=bullish_ob,
@@ -402,6 +435,8 @@ def detect_order_blocks(
         impulse_type=impulse_type,
         mitigated=mitigated,
         mitigated_index=mitigated_index,
+        is_breaker=is_breaker,
+        breaker_index=breaker_index,
     )
 
 

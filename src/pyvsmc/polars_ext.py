@@ -127,6 +127,14 @@ def add_smc_columns(
     from .swings import swings_polars  # noqa: WPS433
     from .zones import zones_polars  # noqa: WPS433
 
+    if isinstance(df, pl.LazyFrame):  # type: ignore[union-attr]
+        # LazyFrame path: use lazy-capable helpers where possible, else collect
+        # For now collect for complex helpers, keep FVG/Swings lazy
+        # Simple: collect, apply eager, return lazy
+        df_eager = df.collect()
+        out_eager = add_smc_columns(df_eager, high_col=high_col, low_col=low_col, close_col=close_col, open_col=open_col, window_size=window_size, fvg_min_gap_size=fvg_min_gap_size, fvg_min_gap_size_pct=fvg_min_gap_size_pct, fvg_mitigation=fvg_mitigation, ob_lookback=ob_lookback, ob_use_fvg=ob_use_fvg, ob_use_bos=ob_use_bos, include_fvg=include_fvg, include_swings=include_swings, include_structure=include_structure, include_order_blocks=include_order_blocks, include_liquidity=include_liquidity, include_zones=include_zones, equal_threshold=equal_threshold, sweep_lookback=sweep_lookback, eq_threshold=eq_threshold)
+        return out_eager.lazy()
+
     if not isinstance(df, pl.DataFrame):  # type: ignore[union-attr]
         raise TypeError(f"Expected polars.DataFrame, got {type(df)}")
 

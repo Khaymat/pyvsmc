@@ -186,6 +186,20 @@ def swings_polars(
     except ImportError as e:
         raise ImportError("polars is required for swings_polars") from e
 
+    if isinstance(df, pl.LazyFrame):
+        # Native lazy: rolling max/min centered
+        width = 2 * window_size + 1
+        # polars rolling uses window_size, need center: shift
+        # For swing high: high == rolling_max centered
+        swing_high_expr = (pl.col(high_col) == pl.col(high_col).rolling_max(window_size=width, min_samples=width, center=True)).fill_null(False)
+        swing_low_expr = (pl.col(low_col) == pl.col(low_col).rolling_min(window_size=width, min_samples=width, center=True)).fill_null(False)
+        return df.with_columns([
+            swing_high_expr.alias("swing_high"),
+            swing_low_expr.alias("swing_low"),
+            pl.when(swing_high_expr).then(pl.col(high_col)).otherwise(None).alias("swing_high_price"),
+            pl.when(swing_low_expr).then(pl.col(low_col)).otherwise(None).alias("swing_low_price"),
+        ])
+
     if not isinstance(df, pl.DataFrame):
         raise TypeError(f"Expected polars.DataFrame, got {type(df)}")
 
