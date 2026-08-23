@@ -84,6 +84,11 @@ def add_smc_columns(
     include_swings: bool = True,
     include_structure: bool = True,
     include_order_blocks: bool = True,
+    include_liquidity: bool = True,
+    include_zones: bool = True,
+    equal_threshold: float = 0.001,
+    sweep_lookback: int = 20,
+    eq_threshold: float = 0.02,
 ) -> Any:
     """Add all SMC indicator columns to a Polars DataFrame.
 
@@ -116,9 +121,11 @@ def add_smc_columns(
     # Import here to avoid circular imports at module load time and to keep
     # polars optional at import time for the core package.
     from .fvg import fvg_polars  # noqa: WPS433
+    from .liquidity import liquidity_polars  # noqa: WPS433
     from .order_blocks import order_blocks_polars  # noqa: WPS433
     from .structure import structure_polars  # noqa: WPS433
     from .swings import swings_polars  # noqa: WPS433
+    from .zones import zones_polars  # noqa: WPS433
 
     if not isinstance(df, pl.DataFrame):  # type: ignore[union-attr]
         raise TypeError(f"Expected polars.DataFrame, got {type(df)}")
@@ -161,6 +168,12 @@ def add_smc_columns(
             use_bos=ob_use_bos,
             window_size=window_size,
         )
+
+    if include_liquidity:
+        out = liquidity_polars(out, high_col=high_col, low_col=low_col, close_col=close_col, equal_threshold=equal_threshold, sweep_lookback=sweep_lookback)
+
+    if include_zones:
+        out = zones_polars(out, high_col=high_col, low_col=low_col, close_col=close_col, window_size=window_size, eq_threshold=eq_threshold)
 
     return out
 
@@ -313,6 +326,16 @@ if _POLARS_AVAILABLE:
                     window_size=window_size,
                 )
 
+            def liquidity(self, *, high_col: str = "high", low_col: str = "low", close_col: str = "close", equal_threshold: float = 0.001, sweep_lookback: int = 20) -> Any:
+                from .liquidity import liquidity_polars  # noqa: WPS433
+
+                return liquidity_polars(self._df, high_col=high_col, low_col=low_col, close_col=close_col, equal_threshold=equal_threshold, sweep_lookback=sweep_lookback)
+
+            def zones(self, *, high_col: str = "high", low_col: str = "low", close_col: str = "close", window_size: int = 2, eq_threshold: float = 0.02) -> Any:
+                from .zones import zones_polars  # noqa: WPS433
+
+                return zones_polars(self._df, high_col=high_col, low_col=low_col, close_col=close_col, window_size=window_size, eq_threshold=eq_threshold)
+
             def add_all(
                 self,
                 *,
@@ -331,6 +354,11 @@ if _POLARS_AVAILABLE:
                 include_swings: bool = True,
                 include_structure: bool = True,
                 include_order_blocks: bool = True,
+                include_liquidity: bool = True,
+                include_zones: bool = True,
+                equal_threshold: float = 0.001,
+                sweep_lookback: int = 20,
+                eq_threshold: float = 0.02,
             ) -> Any:
                 """Append all SMC columns (composes all indicators).
 
@@ -365,6 +393,11 @@ if _POLARS_AVAILABLE:
                     include_swings=include_swings,
                     include_structure=include_structure,
                     include_order_blocks=include_order_blocks,
+                    include_liquidity=include_liquidity,
+                    include_zones=include_zones,
+                    equal_threshold=equal_threshold,
+                    sweep_lookback=sweep_lookback,
+                    eq_threshold=eq_threshold,
                 )
 
     except Exception:

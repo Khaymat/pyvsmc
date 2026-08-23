@@ -6,6 +6,8 @@ Public API
 * :mod:`pyvsmc.swings` — Fractal swing highs/lows
 * :mod:`pyvsmc.structure` — BOS & CHOCH engine
 * :mod:`pyvsmc.order_blocks` — Order block identification
+* :mod:`pyvsmc.liquidity` — Liquidity sweeps & equal highs/lows
+* :mod:`pyvsmc.zones` — Premium/discount & dealing range
 * :mod:`pyvsmc.polars_ext` — Polars ``.smc`` namespace
 
 Quickstart
@@ -24,6 +26,8 @@ Quickstart
     swings = smc.detect_swings(high, low, window_size=2)
     structure = smc.detect_structure(high, low, close)
     obs = smc.detect_order_blocks(open_, high, low, close)
+    liq = smc.detect_liquidity(high, low, close)
+    zones = smc.detect_zones(high, low, close)
 
     # Polars (optional)
     import polars as pl
@@ -35,37 +39,25 @@ Quickstart
 from __future__ import annotations
 
 from .fvg import FVGResult, detect_fvg, fvg_polars
+from .liquidity import LiquidityResult, detect_liquidity, liquidity_polars
 from .order_blocks import OrderBlockResult, detect_order_blocks, order_blocks_polars
 from .structure import StructureResult, detect_structure, structure_polars
 from .swings import SwingResult, detect_swings, swings_polars
+from .zones import ZoneResult, detect_zones, zones_polars
 
-# Polars helpers — imported lazily to keep polars optional, but re-exported
-# here for convenience.  Importing pyvsmc should not fail if polars is
-# absent; polars_ext handles that gracefully.
 try:
     from .polars_ext import add_smc_columns  # noqa: F401
 except ImportError:
     add_smc_columns = None  # type: ignore[assignment]
 
 __all__ = [
-    # FVG
-    "detect_fvg",
-    "FVGResult",
-    "fvg_polars",
-    # Swings
-    "detect_swings",
-    "SwingResult",
-    "swings_polars",
-    # Structure
-    "detect_structure",
-    "StructureResult",
-    "structure_polars",
-    # Order blocks
-    "detect_order_blocks",
-    "OrderBlockResult",
-    "order_blocks_polars",
-    # Polars
+    "detect_fvg", "FVGResult", "fvg_polars",
+    "detect_swings", "SwingResult", "swings_polars",
+    "detect_structure", "StructureResult", "structure_polars",
+    "detect_order_blocks", "OrderBlockResult", "order_blocks_polars",
+    "detect_liquidity", "LiquidityResult", "liquidity_polars",
+    "detect_zones", "ZoneResult", "zones_polars",
     "add_smc_columns",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

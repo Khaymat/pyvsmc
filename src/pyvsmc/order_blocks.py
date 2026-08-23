@@ -49,6 +49,8 @@ class OrderBlockResult:
         validated_index: Index of the impulse/break that validated the OB;
             ``-1`` where not validated or not an OB.
         impulse_type: What triggered the OB — ``"fvg"``, ``"bos"``, or ``""``.
+        mitigated: True where zone later touched by price.
+        mitigated_index: Index of first mitigation bar, -1 if never.
     """
 
     bullish_ob: npt.NDArray[np.bool_]
@@ -58,6 +60,8 @@ class OrderBlockResult:
     ob_type: npt.NDArray[np.object_]
     validated_index: npt.NDArray[np.int64]
     impulse_type: npt.NDArray[np.object_]
+    mitigated: npt.NDArray[np.bool_]
+    mitigated_index: npt.NDArray[np.int64]
 
 
 def _to_float64(arr: npt.ArrayLike) -> npt.NDArray[np.float64]:
@@ -163,6 +167,7 @@ def detect_order_blocks(
     use_fvg: bool = True,
     use_bos: bool = True,
     window_size: int = 2,
+    compute_mitigation: bool = False,
 ) -> OrderBlockResult:
     """Detect Order Blocks — fully vectorized.
 
@@ -232,6 +237,8 @@ def detect_order_blocks(
             ob_type=ob_type,
             validated_index=validated_index,
             impulse_type=impulse_type,
+            mitigated=np.zeros(n, dtype=bool),
+            mitigated_index=np.full(n, -1, dtype=np.int64),
         )
 
     # ---- Gather impulse indices ----
@@ -357,6 +364,34 @@ def detect_order_blocks(
                     validated_index[anchor] = imp_idx
                     impulse_type[anchor] = imp_typ
 
+    # Mitigation: future price touching OB zone (vectorized)
+    mitigated = np.zeros(n, dtype=bool)
+    mitigated_index = np.full(n, -1, dtype=np.int64)
+    if compute_mitigation:
+        ob_idx = np.where(bullish_ob | bearish_ob)[0]
+        for anchor in ob_idx:
+            # start after validated impulse to avoid immediate self-mitigation, but also allow any future bar after anchor
+            start = int(validated_index[anchor] + 1) if validated_index[anchor] != -1 else int(anchor + 1)
+            if start >= n:
+                continue
+            low_future = lo[start:]
+            high_future = h[start:]
+            # bullish OB (demand) mitigated if low <= ob_high (touch)
+            # bearish OB (supply) mitigated if high >= ob_low
+            if bullish_ob[anchor]:
+                hit = np.where(low_future <= ob_high[anchor])[0]
+                if hit.size > 0:
+                    mitigated[anchor] = True
+                    mitigated_index[anchor] = int(start + hit[0])
+            if bearish_ob[anchor]:
+                hit = np.where(high_future >= ob_low[anchor])[0]
+                if hit.size > 0:
+                    # if both bullish and bearish at same anchor, keep earliest hit
+                    idx = int(start + hit[0])
+                    if not mitigated[anchor] or idx < mitigated_index[anchor]:
+                        mitigated[anchor] = True
+                        mitigated_index[anchor] = idx
+
     return OrderBlockResult(
         bullish_ob=bullish_ob,
         bearish_ob=bearish_ob,
@@ -365,6 +400,8 @@ def detect_order_blocks(
         ob_type=ob_type,
         validated_index=validated_index,
         impulse_type=impulse_type,
+        mitigated=mitigated,
+        mitigated_index=mitigated_index,
     )
 
 
@@ -381,6 +418,7 @@ def order_blocks_polars(
     use_fvg: bool = True,
     use_bos: bool = True,
     window_size: int = 2,
+    compute_mitigation: bool = False,
 ) -> object:
     """Polars DataFrame version of :func:`detect_order_blocks`.
 
@@ -422,15 +460,17 @@ def order_blocks_polars(
         use_fvg=use_fvg,
         use_bos=use_bos,
         window_size=window_size,
+        compute_mitigation=compute_mitigation,
     )
-    return df.with_columns(
-        [
-            pl.Series("ob_bullish", res.bullish_ob),
-            pl.Series("ob_bearish", res.bearish_ob),
-            pl.Series("ob_high", res.ob_high),
-            pl.Series("ob_low", res.ob_low),
-            pl.Series("ob_type", res.ob_type),
-            pl.Series("ob_validated_index", res.validated_index),
-            pl.Series("ob_impulse_type", res.impulse_type),
-        ]
-    )
+    cols = [
+        pl.Series("ob_bullish", res.bullish_ob),
+        pl.Series("ob_bearish", res.bearish_ob),
+        pl.Series("ob_high", res.ob_high),
+        pl.Series("ob_low", res.ob_low),
+        pl.Series("ob_type", res.ob_type),
+        pl.Series("ob_validated_index", res.validated_index),
+        pl.Series("ob_impulse_type", res.impulse_type),
+    ]
+    if compute_mitigation:
+        cols += [pl.Series("ob_mitigated", res.mitigated), pl.Series("ob_mitigated_index", res.mitigated_index)]
+    return df.with_columns(cols)
