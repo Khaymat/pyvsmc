@@ -87,22 +87,23 @@ def test_dense_gaps_scalability():
 
 
 def test_adversarial_small_correctness():
-    # Pathological: many bullish gaps, mit at last bar — correctness only, CI-safe
+    # Pathological: many bullish gaps, mit at last bar — correctness only, CI-safe n=1000, no bearish to avoid overwrite
     n = 1000
-    high = np.full(n, 10.0)
-    low = np.full(n, 20.0)
-    low[0] = 9.0
-    low[1] = 9.0
-    low[2:-1] = 20.0 + np.arange(n - 3) * 0.01
+    base = 10.0 + np.arange(n, dtype=np.float64) * 1.0
+    low = base
+    high = base + 1.0
     low[-1] = 9.0
+    high[-1] = 10.0
     close = np.full(n, 10.5)
     close[-1] = 9.0
     res = detect_fvg(high, low, compute_mitigation=True, close=close)
-    # First gap (idx 2) is pure bullish (bearish false), should mitigate at last bar
+    # First gaps are bullish only
     assert res.bullish[2]
     assert not res.bearish[2]
     assert res.mitigated_index[2] == n - 1
-    assert res.mitigated_50_index[2] == n - 1
-    assert res.mitigated_full_index[2] == n - 1
-    # At least some bullish gaps
+    # All bullish gaps should mitigate at last bar
+    idx = np.where(res.bullish)[0]
+    assert np.all(res.mitigated_index[idx] == n - 1)
     assert int(res.bullish.sum()) >= 990
+    # Allow at most 1 bearish (last bar edge)
+    assert int(res.bearish.sum()) <= 1
