@@ -2,7 +2,7 @@
 
 [![Python Version](https://img.shields.io/badge/python-%3E%3D3.10-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![PyPI version](https://img.shields.io/badge/pypi-v0.3.5-orange.svg)](https://pypi.org/project/pyvsmc/)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.3.6-orange.svg)](https://pypi.org/project/pyvsmc/)
 [![Tests](https://img.shields.io/badge/tests-92%20passed-brightgreen.svg)](#testing)
 [![Type Checked](https://img.shields.io/badge/mypy-strict-blue.svg)](#testing)
 [![Ruff](https://img.shields.io/badge/lint-ruff-red.svg)](https://github.com/astral-sh/ruff)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyvsmc"
-version = "0.3.5"
+version = "0.3.6"
 description = "Ultra-fast, fully vectorized market structure and Smart Money Concepts (SMC) technical analysis using NumPy and Polars"
 readme = "README.md"
 license = "MIT"
