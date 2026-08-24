@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyvsmc"
-version = "0.3.3"
+version = "0.3.4"
 description = "Ultra-fast, fully vectorized market structure and Smart Money Concepts (SMC) technical analysis using NumPy and Polars"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "pyvsmc contributors", email = "hello@pyvsmc.dev" },
+    { name = "pyvsmc contributors", email = "rafikhairan120@gmail.com" },
 ]
 maintainers = [
-    { name = "pyvsmc maintainers", email = "hello@pyvsmc.dev" },
+    { name = "pyvsmc maintainers", email = "rafikhairan120@gmail.com" },
 ]
 keywords = ["trading", "technical-analysis", "smart-money-concepts", "smc", "market-structure", "numpy", "polars", "quant"]
 classifiers = [
