@@ -48,6 +48,9 @@ def detect_liquidity(
     equal_threshold: float = 0.001,
     sweep_lookback: int = 20,
     window_size: int = 2,
+    tie: str = "all",
+    swing_high: npt.NDArray[np.bool_] | None = None,
+    swing_low: npt.NDArray[np.bool_] | None = None,
 ) -> LiquidityResult:
     """Detect equal highs/lows and liquidity sweeps — vectorized.
 
@@ -59,7 +62,11 @@ def detect_liquidity(
         high, low, close: OHLC arrays (n,).
         equal_threshold: Fraction for equal detection (0.001=0.1%). If >1 interpreted as absolute.
         sweep_lookback: Lookback for sweep level.
-        window_size: Unused, kept for API symmetry.
+        window_size: Unused, kept for API symmetry (used when swings computed internally).
+        tie: Passed to ``detect_swings`` when swings computed internally.
+        swing_high: Optional precomputed swing_high mask. If supplied, must be
+            supplied together with ``swing_low`` and will be used verbatim.
+        swing_low: Optional precomputed swing_low mask.
 
     Returns:
         LiquidityResult
@@ -68,6 +75,21 @@ def detect_liquidity(
     n = h.shape[0]
     if not (lo.shape[0]==n and cl.shape[0]==n):
         raise ValueError("high, low, close must same length")
+    if tie not in ("all", "first", "strict"):
+        raise ValueError(f"tie must be 'all','first','strict', got {tie}")
+    if (swing_high is None) ^ (swing_low is None):
+        raise ValueError("Either both swing_high and swing_low must be provided or neither")
+    if swing_high is not None and swing_low is not None:
+        sh_arr = np.asarray(swing_high, dtype=bool)
+        sl_arr = np.asarray(swing_low, dtype=bool)
+        if sh_arr.shape[0] != n or sl_arr.shape[0] != n:
+            raise ValueError("swing_high/swing_low must match input length")
+        # Injected swings take precedence; window_size and tie irrelevant to swing generation
+        _swing_high_inj = sh_arr
+        _swing_low_inj = sl_arr
+    else:
+        _swing_high_inj = None
+        _swing_low_inj = None
     equal_high = np.zeros(n, dtype=bool)
     equal_low = np.zeros(n, dtype=bool)
     equal_swing_high = np.zeros(n, dtype=bool)
@@ -100,27 +122,34 @@ def detect_liquidity(
     equal_low[1:][valid_l] = eq_l[valid_l]
 
     # Swing-based EQH/EQL: compare swing highs/lows
-    if n >= 2 * window_size + 1:
+    # Composition: use injected swings if provided, else compute with tie
+    if _swing_high_inj is not None and _swing_low_inj is not None:
+        sh_idx = np.where(_swing_high_inj)[0]
+        sl_idx = np.where(_swing_low_inj)[0]
+    elif n >= 2 * window_size + 1:
         from .swings import detect_swings
-        swings = detect_swings(h, lo, window_size=window_size)
+        swings = detect_swings(h, lo, window_size=window_size, tie=tie)
         sh_idx = np.where(swings.swing_high)[0]
         sl_idx = np.where(swings.swing_low)[0]
-        if sh_idx.size >= 2:
-            sh_prices = h[sh_idx]
-            valid_sh = ~np.isnan(sh_prices[:-1]) & ~np.isnan(sh_prices[1:])
-            if equal_threshold > 1:
-                eq_sh = np.abs(sh_prices[1:] - sh_prices[:-1]) <= equal_threshold
-            else:
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    denom = np.abs(sh_prices[:-1])
-                    denom[denom==0]=np.nan
-                    eq_sh = np.abs(sh_prices[1:]-sh_prices[:-1])/denom <= equal_threshold
-                eq_sh = np.nan_to_num(eq_sh, nan=False)
-            # mark true at later swing index where condition holds and both windows valid
-            for k in range(1, sh_idx.size):
-                if valid_sh[k-1] and eq_sh[k-1]:
-                    equal_swing_high[sh_idx[k]] = True
-        if sl_idx.size >= 2:
+    else:
+        sh_idx = np.array([], dtype=np.int64)
+        sl_idx = np.array([], dtype=np.int64)
+    if sh_idx.size >= 2:
+        sh_prices = h[sh_idx]
+        valid_sh = ~np.isnan(sh_prices[:-1]) & ~np.isnan(sh_prices[1:])
+        if equal_threshold > 1:
+            eq_sh = np.abs(sh_prices[1:] - sh_prices[:-1]) <= equal_threshold
+        else:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                denom = np.abs(sh_prices[:-1])
+                denom[denom==0]=np.nan
+                eq_sh = np.abs(sh_prices[1:]-sh_prices[:-1])/denom <= equal_threshold
+            eq_sh = np.nan_to_num(eq_sh, nan=False)
+        # mark true at later swing index where condition holds and both windows valid
+        for k in range(1, sh_idx.size):
+            if valid_sh[k-1] and eq_sh[k-1]:
+                equal_swing_high[sh_idx[k]] = True
+    if sl_idx.size >= 2:
             sl_prices = lo[sl_idx]
             valid_sl = ~np.isnan(sl_prices[:-1]) & ~np.isnan(sl_prices[1:])
             if equal_threshold > 1:
@@ -174,12 +203,12 @@ def detect_liquidity(
     return LiquidityResult(equal_high, equal_low, equal_swing_high, equal_swing_low, sweep_high, sweep_low, sweep_level)
 
 
-def liquidity_polars(df: object, *, high_col="high", low_col="low", close_col="close", equal_threshold=0.001, sweep_lookback=20, window_size=2) -> object:
+def liquidity_polars(df: object, *, high_col="high", low_col="low", close_col="close", equal_threshold=0.001, sweep_lookback=20, window_size=2, tie: str = "all") -> object:
     try:
         import polars as pl
     except ImportError as e:
         raise ImportError("polars required") from e
     if not isinstance(df, pl.DataFrame):
         raise TypeError(f"Expected pl.DataFrame, got {type(df)}")
-    res = detect_liquidity(df[high_col].to_numpy().astype(float), df[low_col].to_numpy().astype(float), df[close_col].to_numpy().astype(float), equal_threshold=equal_threshold, sweep_lookback=sweep_lookback, window_size=window_size)
+    res = detect_liquidity(df[high_col].to_numpy().astype(float), df[low_col].to_numpy().astype(float), df[close_col].to_numpy().astype(float), equal_threshold=equal_threshold, sweep_lookback=sweep_lookback, window_size=window_size, tie=tie)
     return df.with_columns([pl.Series("equal_high", res.equal_high), pl.Series("equal_low", res.equal_low), pl.Series("equal_swing_high", res.equal_swing_high), pl.Series("equal_swing_low", res.equal_swing_low), pl.Series("sweep_high", res.sweep_high), pl.Series("sweep_low", res.sweep_low), pl.Series("sweep_level", res.sweep_level)])

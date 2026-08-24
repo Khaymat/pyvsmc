@@ -111,6 +111,7 @@ def detect_structure(
     swing_high: npt.NDArray[np.bool_] | None = None,
     swing_low: npt.NDArray[np.bool_] | None = None,
     break_mode: Literal["close", "wick", "both"] = "close",
+    tie: str = "all",
 ) -> StructureResult:
     """Detect BOS and CHOCH — fully vectorized.
 
@@ -138,12 +139,15 @@ def detect_structure(
             ``swing_high``/``swing_low`` are provided).
         swing_high: Optional pre-computed swing-high boolean mask.
         swing_low: Optional pre-computed swing-low boolean mask.
+        break_mode: How to define a break — ``"close"``, ``"wick"``, ``"both"``.
+        tie: Passed to ``detect_swings`` when swings are computed internally.
+            Ignored if ``swing_high``/``swing_low`` are supplied.
 
     Returns:
         :class:`StructureResult` with BOS/CHOCH masks and trend.
 
     Raises:
-        ValueError: If array lengths differ or ``window_size < 1``.
+        ValueError: If array lengths differ or ``window_size < 1`` or ``tie`` invalid.
     """
     h = _to_float64(high)
     lo = _to_float64(low)
@@ -154,10 +158,14 @@ def detect_structure(
         raise ValueError(f"high, low, close must have same length: {h.shape[0]}, {lo.shape[0]}, {cl.shape[0]}")
     if window_size < 1:
         raise ValueError(f"window_size must be >= 1, got {window_size}")
+    if tie not in ("all", "first", "strict"):
+        raise ValueError(f"tie must be 'all','first','strict', got {tie}")
+    if (swing_high is None) ^ (swing_low is None):
+        raise ValueError("Either both swing_high and swing_low must be provided or neither")
 
     # --- Step 1: swings ---
     if swing_high is None or swing_low is None:
-        swing_res = detect_swings(h, lo, window_size=window_size)
+        swing_res = detect_swings(h, lo, window_size=window_size, tie=tie)
         sh_mask = swing_res.swing_high
         sl_mask = swing_res.swing_low
     else:
@@ -436,6 +444,7 @@ def structure_polars(
     close_col: str = "close",
     window_size: int = 2,
     break_mode: Literal["close", "wick", "both"] = "close",
+    tie: str = "all",
 ) -> object:
     """Polars DataFrame version of :func:`detect_structure`.
 
@@ -464,7 +473,7 @@ def structure_polars(
     high = df[high_col].to_numpy().astype(float)
     low = df[low_col].to_numpy().astype(float)
     close = df[close_col].to_numpy().astype(float)
-    res = detect_structure(high, low, close, window_size=window_size, break_mode=break_mode)
+    res = detect_structure(high, low, close, window_size=window_size, break_mode=break_mode, tie=tie)
     return df.with_columns(
         [
             pl.Series("bos_bullish", res.bos_bullish),

@@ -155,6 +155,7 @@ def detect_order_blocks(
     window_size: int = 2,
     compute_mitigation: bool = False,
     zone_mode: str = "full",
+    tie: str = "all",
 ) -> OrderBlockResult:
     """Detect Order Blocks — fully vectorized.
 
@@ -208,6 +209,8 @@ def detect_order_blocks(
         raise ValueError(f"lookback must be >= 1, got {lookback}")
     if zone_mode not in ("full", "body", "mean_threshold"):
         raise ValueError(f"zone_mode must be 'full','body','mean_threshold', got {zone_mode}")
+    if tie not in ("all", "first", "strict"):
+        raise ValueError(f"tie must be 'all','first','strict', got {tie}")
 
     bullish_ob = np.zeros(n, dtype=bool)
     bearish_ob = np.zeros(n, dtype=bool)
@@ -250,7 +253,7 @@ def detect_order_blocks(
             impulse_bear_types.append(np.full(bear_fvg_idx.shape[0], "fvg", dtype=object))
 
     if use_bos:
-        struct = detect_structure(h, lo, cl, window_size=window_size)
+        struct = detect_structure(h, lo, cl, window_size=window_size, tie=tie)
         # BOS bullish impulses and CHOCH bullish also count as bullish impulses?
         # For OB detection, we consider both BOS and CHOCH as structure breaks.
         # But to avoid double counting, we merge.
@@ -436,6 +439,8 @@ def order_blocks_polars(
     use_bos: bool = True,
     window_size: int = 2,
     compute_mitigation: bool = False,
+    zone_mode: str = "full",
+    tie: str = "all",
 ) -> object:
     """Polars DataFrame version of :func:`detect_order_blocks`.
 
@@ -478,6 +483,8 @@ def order_blocks_polars(
         use_bos=use_bos,
         window_size=window_size,
         compute_mitigation=compute_mitigation,
+        zone_mode=zone_mode,
+        tie=tie,
     )
     cols = [
         pl.Series("ob_bullish", res.bullish_ob),

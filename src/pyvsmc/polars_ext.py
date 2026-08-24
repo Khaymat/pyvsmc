@@ -74,12 +74,16 @@ def add_smc_columns(
     close_col: str = "close",
     open_col: str = "open",
     window_size: int = 2,
+    tie: str = "all",
     fvg_min_gap_size: float | None = None,
     fvg_min_gap_size_pct: float | None = None,
     fvg_mitigation: bool = False,
     ob_lookback: int = 10,
     ob_use_fvg: bool = True,
     ob_use_bos: bool = True,
+    ob_zone_mode: str = "full",
+    ob_tie: str | None = None,
+    structure_break_mode: str = "close",
     include_fvg: bool = True,
     include_swings: bool = True,
     include_structure: bool = True,
@@ -132,11 +136,15 @@ def add_smc_columns(
         # For now collect for complex helpers, keep FVG/Swings lazy
         # Simple: collect, apply eager, return lazy
         df_eager = df.collect()
-        out_eager = add_smc_columns(df_eager, high_col=high_col, low_col=low_col, close_col=close_col, open_col=open_col, window_size=window_size, fvg_min_gap_size=fvg_min_gap_size, fvg_min_gap_size_pct=fvg_min_gap_size_pct, fvg_mitigation=fvg_mitigation, ob_lookback=ob_lookback, ob_use_fvg=ob_use_fvg, ob_use_bos=ob_use_bos, include_fvg=include_fvg, include_swings=include_swings, include_structure=include_structure, include_order_blocks=include_order_blocks, include_liquidity=include_liquidity, include_zones=include_zones, equal_threshold=equal_threshold, sweep_lookback=sweep_lookback, eq_threshold=eq_threshold)
+        out_eager = add_smc_columns(df_eager, high_col=high_col, low_col=low_col, close_col=close_col, open_col=open_col, window_size=window_size, tie=tie, fvg_min_gap_size=fvg_min_gap_size, fvg_min_gap_size_pct=fvg_min_gap_size_pct, fvg_mitigation=fvg_mitigation, ob_lookback=ob_lookback, ob_use_fvg=ob_use_fvg, ob_use_bos=ob_use_bos, ob_zone_mode=ob_zone_mode, ob_tie=ob_tie, structure_break_mode=structure_break_mode, include_fvg=include_fvg, include_swings=include_swings, include_structure=include_structure, include_order_blocks=include_order_blocks, include_liquidity=include_liquidity, include_zones=include_zones, equal_threshold=equal_threshold, sweep_lookback=sweep_lookback, eq_threshold=eq_threshold)
         return out_eager.lazy()
 
     if not isinstance(df, pl.DataFrame):  # type: ignore[union-attr]
         raise TypeError(f"Expected polars.DataFrame, got {type(df)}")
+
+    # Default ob_tie to tie if not specified (preserve 0.3.x default "all")
+    if ob_tie is None:
+        ob_tie = tie
 
     out = df
 
@@ -151,7 +159,7 @@ def add_smc_columns(
         )
 
     if include_swings:
-        out = swings_polars(out, high_col=high_col, low_col=low_col, window_size=window_size)
+        out = swings_polars(out, high_col=high_col, low_col=low_col, window_size=window_size, tie=tie)
 
     if include_structure:
         out = structure_polars(
@@ -160,6 +168,8 @@ def add_smc_columns(
             low_col=low_col,
             close_col=close_col,
             window_size=window_size,
+            break_mode=structure_break_mode,
+            tie=tie,
         )
 
     if include_order_blocks:
@@ -175,13 +185,16 @@ def add_smc_columns(
             use_fvg=ob_use_fvg,
             use_bos=ob_use_bos,
             window_size=window_size,
+            compute_mitigation=False,
+            zone_mode=ob_zone_mode,
+            tie=ob_tie,
         )
 
     if include_liquidity:
-        out = liquidity_polars(out, high_col=high_col, low_col=low_col, close_col=close_col, equal_threshold=equal_threshold, sweep_lookback=sweep_lookback)
+        out = liquidity_polars(out, high_col=high_col, low_col=low_col, close_col=close_col, equal_threshold=equal_threshold, sweep_lookback=sweep_lookback, window_size=window_size, tie=tie)
 
     if include_zones:
-        out = zones_polars(out, high_col=high_col, low_col=low_col, close_col=close_col, window_size=window_size, eq_threshold=eq_threshold)
+        out = zones_polars(out, high_col=high_col, low_col=low_col, close_col=close_col, window_size=window_size, eq_threshold=eq_threshold, tie=tie)
 
     return out
 
@@ -247,6 +260,7 @@ if _POLARS_AVAILABLE:
                 high_col: str = "high",
                 low_col: str = "low",
                 window_size: int = 2,
+                tie: str = "all",
             ) -> Any:
                 """Append swing columns.
 
@@ -254,13 +268,14 @@ if _POLARS_AVAILABLE:
                     high_col: High column name.
                     low_col: Low column name.
                     window_size: Window size ``N``.
+                    tie: Plateau handling.
 
                 Returns:
                     DataFrame with swing columns.
                 """
                 from .swings import swings_polars  # noqa: WPS433
 
-                return swings_polars(self._df, high_col=high_col, low_col=low_col, window_size=window_size)
+                return swings_polars(self._df, high_col=high_col, low_col=low_col, window_size=window_size, tie=tie)
 
             def structure(
                 self,
@@ -269,6 +284,8 @@ if _POLARS_AVAILABLE:
                 low_col: str = "low",
                 close_col: str = "close",
                 window_size: int = 2,
+                break_mode: str = "close",
+                tie: str = "all",
             ) -> Any:
                 """Append BOS/CHOCH structure columns.
 
@@ -277,6 +294,8 @@ if _POLARS_AVAILABLE:
                     low_col: Low column name.
                     close_col: Close column name.
                     window_size: Swing window size.
+                    break_mode: How to define break.
+                    tie: Swing tie handling.
 
                 Returns:
                     DataFrame with structure columns.
@@ -289,6 +308,8 @@ if _POLARS_AVAILABLE:
                     low_col=low_col,
                     close_col=close_col,
                     window_size=window_size,
+                    break_mode=break_mode,  # type: ignore[arg-type]
+                    tie=tie,
                 )
 
             def order_blocks(

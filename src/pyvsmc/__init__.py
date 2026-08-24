@@ -60,4 +60,4 @@ __all__ = [
     "add_smc_columns",
 ]
 
-__version__ = "0.3.4"
+__version__ = "0.3.5"
