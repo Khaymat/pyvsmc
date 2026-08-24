@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import warnings
 
 import numpy as np
 import numpy.typing as npt
@@ -145,12 +146,15 @@ def detect_swings(
     # Center value of each window
     # high_windows[i] corresponds to center index c = i + window_size
     # Check if center equals max of window
-    # Use vectorized max/min
-    high_max = np.nanmax(high_windows, axis=1)  # but we already filtered NaN windows
-    low_min = np.nanmin(low_windows, axis=1)
-    # For prominence / strict need opposite extrema and counts
-    high_min = np.nanmin(high_windows, axis=1)
-    low_max = np.nanmax(low_windows, axis=1)
+    # Use vectorized max/min — all-NaN windows return NaN and emit RuntimeWarning;
+    # they are already invalidated by high_valid/low_valid, so suppress locally.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        high_max = np.nanmax(high_windows, axis=1)  # but we already filtered NaN windows
+        low_min = np.nanmin(low_windows, axis=1)
+        # For prominence / strict need opposite extrema and counts
+        high_min = np.nanmin(high_windows, axis=1)
+        low_max = np.nanmax(low_windows, axis=1)
     # Count of max/min occurrences for strict
     # Use broadcasting to count equals (vectorized)
     # For tie modes we need additional info, computed below per mode
