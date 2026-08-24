@@ -2,7 +2,7 @@
 
 [![Python Version](https://img.shields.io/badge/python-%3E%3D3.10-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![PyPI version](https://img.shields.io/badge/pypi-v0.3.6-orange.svg)](https://pypi.org/project/pyvsmc/)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.3.7-orange.svg)](https://pypi.org/project/pyvsmc/)
 [![Tests](https://img.shields.io/badge/tests-92%20passed-brightgreen.svg)](#testing)
 [![Type Checked](https://img.shields.io/badge/mypy-strict-blue.svg)](#testing)
 [![Ruff](https://img.shields.io/badge/lint-ruff-red.svg)](https://github.com/astral-sh/ruff)
@@ -127,22 +127,22 @@ df = df.smc.zones(eq_threshold=0.02)
 Bullish `Low[i] > High[i-2]` `[High[i-2], Low[i]]`, Bearish `High[i] < Low[i-2]`.
 Returns `FVGResult` with `bullish/bearish`, `bullish_upper/lower`, `ce_level`, `gap_size`, `mitigated/mitigated_50/mitigated_full/inverted` + indices. `close` enables IFVG.
 
-### `detect_swings(high, low, window_size=2)`
-`High[i]==max(window)`, `Low[i]==min(window)`. Returns `SwingResult`.
+### `detect_swings(high, low, window_size=2, tie="all")`
+`High[i]==max(window)`, `Low[i]==min(window)`. `tie="all"` (current default, legacy — every equal extremum), `"first"` (one deterministic per plateau, flat →0), `"strict"` (unique). Returns `SwingResult`.
 
-### `detect_structure(high, low, close, window_size=2, *, break_mode="close")`
-`break_mode="close"|"wick"|"both"`, first-cross only. Returns `bos_bullish/bearish`, `choch_*`, `bos_level`, `trend`.
+### `detect_structure(high, low, close, window_size=2, *, break_mode="close", tie="all", swing_high=None, swing_low=None)`
+`break_mode="close"|"wick"|"both"`, first-cross, `tie` forwarded when swings computed internally. If `swing_high`/`swing_low` supplied (both or neither, else `ValueError`), they are used verbatim and `window_size`/`tie` are ignored for swing generation.
 
-### `detect_order_blocks(open_, high, low, close, *, lookback=10, zone_mode="full", compute_mitigation=False)`
-`zone_mode="full"|"body"|"mean_threshold"`. Returns `bullish_ob/bearish_ob`, `ob_high/low`, `mitigated/is_breaker`.
+### `detect_order_blocks(open_, high, low, close, *, lookback=10, zone_mode="full", compute_mitigation=False, tie="all", break_mode="close")`
+`zone_mode="full"|"body"|"mean_threshold"`, `tie` forwarded to structure/swings, `break_mode` forwarded. Returns `bullish_ob/bearish_ob`, `ob_high/low`, `mitigated/is_breaker`.
 
-### `detect_liquidity(high, low, close, *, equal_threshold=0.001, sweep_lookback=20, window_size=2)`
-Returns `equal_high/low` (adjacent) + `equal_swing_high/low` (EQH/EQL), `sweep_high/low`.
+### `detect_liquidity(high, low, close, *, equal_threshold=0.001, sweep_lookback=20, window_size=2, tie="all", swing_high=None, swing_low=None)`
+`tie` and optional `swing_high`/`swing_low` injection (both or neither). Returns `equal_high/low` + `equal_swing_high/low` (EQH/EQL), `sweep_high/low`.
 
-### `detect_zones(high, low, close, window_size=2, eq_threshold=0.02)`
-Returns `premium/discount/equilibrium`, `range_high/low`, `ote_high/low/705`, `in_ote`.
+### `detect_zones(high, low, close, window_size=2, eq_threshold=0.02, tie="all", swing_high=None, swing_low=None)`
+`tie` and optional swing injection as above. Returns `premium/discount/equilibrium`, `range_high/low`, `ote_high/low/705`, `in_ote`.
 
-All have `*_polars` variants. Polars `add_smc_columns` params: `include_*`, `fvg_mitigation` (see `polars_ext.py`). NumPy `break_mode`/`zone_mode` are not yet exposed via Polars.
+All have `*_polars` variants (`swings_polars`, `structure_polars` with `break_mode`/`tie`, `liquidity_polars`/`zones_polars` with `tie`, `order_blocks_polars` with `zone_mode`/`tie`/`break_mode`). `add_smc_columns` exposes `tie`, `structure_break_mode`, `ob_zone_mode`/`ob_tie` (defaults preserve `0.3.x`).
 
 ---
 
